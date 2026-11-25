@@ -72,7 +72,6 @@ class About(Scene):
             c.text(4, 14 + i * 8, s)
 
 
-ASSETS = os.environ.get("GOTHI_ASSETS") or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "flipper")
 
 
 class Player(Scene):
@@ -105,7 +104,7 @@ class Message(Scene):
 
 def animations(gothi):
     """The animations of assets/flipper/dolphin/external (tools/fetch-assets.sh downloads them)."""
-    d = os.path.join(ASSETS, "dolphin", "external")
+    d = os.path.join(flipper.ASSETS, "dolphin", "external")
     if not os.path.isdir(d):
         return Message("Animations", ["no graphics found", "run tools/fetch-", "assets.sh"])
     names = sorted(n for n in os.listdir(d) if os.path.isdir(os.path.join(d, n)))
@@ -203,11 +202,12 @@ class SettingsScene(Scene):
 
 
 def main_menu():
+    mm = "icons/MainMenu/"
     return Menu("gothi", [
-        ("Clock", lambda g: Clock()),
-        ("Battery", lambda g: Battery()),
-        ("Animations", animations),
-        ("Key test", lambda g: Keys()),
-        ("Settings", lambda g: SettingsScene()),
-        ("About", lambda g: About()),
-    ])
+        ("Clock", lambda g: Clock(), mm + "Plugins_14"),
+        ("Battery", lambda g: Battery(), "icons/Power/Battery_16x16.png"),
+        ("Animations", animations, mm + "FileManager_14"),
+        ("Key test", lambda g: Keys(), mm + "Debug_14"),
+        ("Settings", lambda g: SettingsScene(), mm + "Settings_14"),
+        ("About", lambda g: About(), mm + "U2F_14"),
+    ], status=True)

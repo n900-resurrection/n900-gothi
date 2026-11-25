@@ -12,6 +12,13 @@ import zlib
 from .canvas import Canvas
 
 
+# Where the firmware graphics are: GOTHI_ASSETS, else assets/flipper of the source tree (tools/fetch-assets.sh), else /opt/gothi/share/flipper (the package).
+_here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ASSETS = os.environ.get("GOTHI_ASSETS") or next(
+    (d for d in (os.path.join(_here, "assets", "flipper"), "/opt/gothi/share/flipper") if os.path.isdir(d)), os.path.join(_here, "assets", "flipper"))
+_icons = {}
+
+
 class Image:
     """A one bit picture: `px` has width*height bytes, 1 = ink."""
     def __init__(self, w, h, px):
@@ -167,16 +174,38 @@ def read_manifest(path):
     return items
 
 
-def blit(c, image, x, y, scale=1):
-    """Draw the ink of an Image on a Canvas (white stays transparent, like canvas_draw_icon)."""
+class Still:
+    """A single PNG icon with the interface of an Animation."""
+    def __init__(self, path):
+        self.frames = [read_png(path)]
+        self.w, self.h = self.frames[0].w, self.frames[0].h
+
+    def frame_at(self, t):
+        return self.frames[0]
+
+
+def load_icon(rel):
+    """An icon of the firmware by its path below ASSETS ('icons/MainMenu/Settings_14' is an animated icon, 'icons/Power/Battery_16x16.png' a still one);
+    None when it is not there. Loaded once."""
+    if rel not in _icons:
+        path = os.path.join(ASSETS, rel)
+        try:
+            _icons[rel] = Animation(path) if os.path.isdir(path) else Still(path)
+        except (OSError, ValueError, KeyError):
+            _icons[rel] = None
+    return _icons[rel]
+
+
+def blit(c, image, x, y, scale=1, v=1):
+    """Draw the ink of an Image on a Canvas (white stays transparent, like canvas_draw_icon); v=0 draws it in paper colour (on an inverted row)."""
     for j in range(image.h):
         row = image.px[j * image.w:(j + 1) * image.w]
         for i in range(image.w):
             if row[i]:
                 if scale == 1:
-                    c.pixel(x + i, y + j)
+                    c.pixel(x + i, y + j, v)
                 else:
-                    c.box(x + i * scale, y + j * scale, scale, scale)
+                    c.box(x + i * scale, y + j * scale, scale, scale, v)
 
 
-Canvas.blit = lambda self, image, x, y, scale=1: blit(self, image, x, y, scale)
+Canvas.blit = lambda self, image, x, y, scale=1, v=1: blit(self, image, x, y, scale, v)

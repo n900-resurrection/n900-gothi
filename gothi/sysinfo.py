@@ -2,6 +2,7 @@
 import os
 import re
 import subprocess
+import threading
 import time
 
 SLIDE = "/sys/devices/platform/gpio-switch/slide/state"
@@ -51,11 +52,21 @@ def _battery_sysfs():
     return None
 
 
+_battery_state = {"value": None, "time": 0.0, "busy": False}
+
+
 def battery():
-    """{'percent', 'mV', 'mAh', 'full_mAh', 'charging'} or None; read at most every 10 seconds (hal-device is slow)."""
-    def read():
-        try:
-            return _battery_n900() if is_n900() else _battery_sysfs()
-        except Exception:  # noqa: BLE001
-            return None
-    return _cached("battery", 10, read)
+    """{'percent', 'mV', 'mAh', 'full_mAh', 'charging'} or None. Never blocks: the data is read in a thread at most every 10 seconds
+    (hal-device is slow), the last value is returned meanwhile (None before the first one arrives)."""
+    st = _battery_state
+    if not st["busy"] and time.time() - st["time"] > 10:
+        st["busy"] = True
+
+        def work():
+            try:
+                st["value"] = _battery_n900() if is_n900() else _battery_sysfs()
+            except Exception:  # noqa: BLE001
+                st["value"] = None
+            st["time"], st["busy"] = time.time(), False
+        threading.Thread(target=work, daemon=True).start()
+    return st["value"]

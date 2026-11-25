@@ -6,7 +6,7 @@ It is not an emulator of the Flipper and has none of its radios (Sub-GHz, NFC, R
 
 Successor of [RPi_Zero_Gothi](https://github.com/elPytel/RPi_Zero_Gothi) (Raspberry Pi Zero with an OLED HAT).
 
-> **MVP.** Works on the N900 and on the PC: the menu, a clock, battery data, a key test, a player of the firmware animations. Everything else is still to do.
+> **MVP.** Works on the N900 and on the PC: the menu with the firmware icons, a clock, battery data, a key test, a player of the firmware animations, settings (colour, screen size), a `.deb` package. Everything else is still to do.
 
 ## Two ways to control it
 
@@ -26,10 +26,12 @@ python3 -m venv .venv && .venv/bin/pip install pysdl2 pysdl2-dll
 python3 -m unittest discover -s tests  # tests need no display
 ```
 
-On the phone (Python 3.11 and `libsdl2` from the [n900-resurrection repository](https://n900-resurrection.github.io/), then from the PC):
+On the phone, as a package (section Utilities, menu entry "gothi"): built in the project [nokia-n900-apps](https://github.com/n900-resurrection/nokia-n900-apps), where this repository is `apps/n900-gothi`:
 ```sh
-./tools/deploy-n900.sh                 # copies the program and PySDL2, adds the menu entry "gothi"
+make -C apps/pysdl2 install            # python3-pysdl2 (needs python3.11 and libsdl2 of the project repository)
+make -C apps/n900-gothi install        # the package gothi; `make deb` only builds it, `make test` runs 10 tests on the phone
 ```
+For development, without a package: `./tools/deploy-n900.sh` copies the source tree and PySDL2 to the phone.
 
 ## Design
 
@@ -41,7 +43,7 @@ On the phone (Python 3.11 and `libsdl2` from the [n900-resurrection repository](
 
 ## Next
 
-Icons in the main menu (firmware `icons/MainMenu`), the status bar, speech bubbles of the animations, Wi-Fi scan, GPS, FM, USB OTG modules, a `.deb` package, an icon.
+Speech bubbles of the animations, Wi-Fi scan, GPS, FM, USB OTG modules; see the [issues](https://github.com/n900-resurrection/n900-gothi/issues).
 
 ## Licence
 

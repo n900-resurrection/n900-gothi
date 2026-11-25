@@ -1,7 +1,9 @@
 """Scenes and the manager that holds them: a stack, the top scene draws and gets the keys (like the view dispatcher of the Flipper firmware)."""
 import os
 
-from . import keys
+import time
+
+from . import flipper, keys, sysinfo
 
 
 class Scene:
@@ -52,14 +54,22 @@ class Menu(Scene):
     """A list; the selected row is inverted, a scroll bar on the right (the submenu of the Flipper)."""
     ROW = 12
 
-    def __init__(self, title, items):
-        self.title, self.items = title, items      # items: [(label, factory(gothi) -> Scene)]
+    def __init__(self, title, items, status=False):
+        """items: [(label, factory(gothi) -> Scene)] or (label, factory, icon) with the icon as a path below flipper.ASSETS; `status`: battery and time on the title line."""
+        self.title, self.items, self.status = title, items, status
+        self.selected_at = time.time()
+        if any(len(i) > 2 and i[2] and flipper.load_icon(i[2]) for i in items):
+            self.ROW = 16                          # rows tall enough for the 14 px icons
         self.sel = 0
         self.top_row = 0
         self.ROWS = 4
 
     def draw(self, c, gothi):
         c.text(2, 2, self.title)
+        if self.status:
+            b = sysinfo.battery()
+            s = time.strftime("%H:%M") + (f" {b['percent']}%" if b and b["percent"] is not None else "")
+            c.text(c.w - 2 - c.text_width(s), 2, s)
         c.hline(0, 9, c.w)
         self.ROWS = (c.h - 12) // self.ROW            # rows visible below the title bar
         for i in range(self.ROWS):
@@ -69,7 +79,14 @@ class Menu(Scene):
             y = 12 + i * self.ROW
             if n == self.sel:
                 c.box(0, y - 1, c.w - 5, self.ROW - 1)
-            c.text(4, y + 2, self.items[n][0], v=0 if n == self.sel else 1)
+            ink = 0 if n == self.sel else 1
+            x = 4
+            icon = flipper.load_icon(self.items[n][2]) if len(self.items[n]) > 2 and self.items[n][2] else None
+            if self.ROW == 16:
+                x = 24
+                if icon:
+                    c.blit(icon.frame_at(time.time() - self.selected_at if n == self.sel else 0), 4, y + (self.ROW - 1 - icon.h) // 2, v=ink)
+            c.text(x, y + (self.ROW - 5) // 2, self.items[n][0], v=ink)
         if len(self.items) > self.ROWS:                       # scroll bar
             bar = c.h - 12
             c.vline(c.w - 2, 11, bar)
@@ -89,3 +106,4 @@ class Menu(Scene):
         elif k in (keys.BACK, keys.LEFT):
             gothi.pop()
         self.top_row = min(max(self.top_row, self.sel - self.ROWS + 1), self.sel)
+        self.selected_at = time.time()
