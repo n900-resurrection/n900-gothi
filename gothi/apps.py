@@ -1,5 +1,6 @@
 """The applications of the main menu. Each is a Scene; `main_menu()` builds the root."""
 import os
+import random
 import time
 
 from . import __version__, keys, sysinfo
@@ -75,20 +76,58 @@ class About(Scene):
 
 
 class Player(Scene):
-    """Plays one animation of the firmware (frame rate and frame order from its meta.txt)."""
+    """Plays one animation of the firmware: passive frames in a loop, OK plays the active part, the speech bubbles of its meta.txt."""
 
     def __init__(self, path):
-        self.anim, self.start = flipper.Animation(path), None
+        self.anim, self.play = flipper.Animation(path), None
         self.title = self.anim.name
 
+    def key(self, k, gothi):
+        if k == keys.OK and self.play:
+            self.play.activate(time.time())
+        else:
+            super().key(k, gothi)
+
     def draw(self, c, gothi):
-        self.start = self.start or time.time()
+        now = time.time()
+        self.play = self.play or flipper.Playback(self.anim, now)
         a = self.anim
         x, y = (c.w - a.w) // 2, (c.h - a.h) // 2
         if gothi.settings["border"] and (a.w < c.w or a.h < c.h):
             c.clear(1)                                         # a black frame around the animation, as on a screen larger than the Flipper's
             c.box(x, y, a.w, a.h, 0)
-        c.blit(a.frame_at(time.time() - self.start), x, y)
+        frame, pos = self.play.at(now)
+        c.blit(frame, x, y)
+        for b in self.play.bubbles(pos):
+            flipper.draw_bubble(c, b, x, y)
+
+
+class Dolphin(Player):
+    """Like the desktop of the Flipper: animations of the firmware picked by their weight and the level of the dolphin (Settings), one after another.
+    Right = the next one, OK = the dolphin does its active part, Back = out."""
+
+    def __init__(self, rng=None):
+        self.rng = rng or random.Random()
+        self.manifest = flipper.read_manifest(os.path.join(flipper.ASSETS, "dolphin", "external", "manifest.txt"))
+        self.anim = self.play = None
+        self.until = 0
+
+    def next(self, gothi, now):
+        name = flipper.pick(self.manifest, gothi.settings["level"], self.rng)
+        self.anim = flipper.Animation(os.path.join(flipper.ASSETS, "dolphin", "external", name))
+        self.play = flipper.Playback(self.anim, now)
+        self.until = now + min(self.anim.duration or 60, 180)         # Duration is the time on the screen (the firmware: up to an hour), shortened
+
+    def draw(self, c, gothi):
+        if self.anim is None or time.time() > self.until:
+            self.next(gothi, time.time())
+        super().draw(c, gothi)
+
+    def key(self, k, gothi):
+        if k == keys.RIGHT:
+            self.anim = None
+        else:
+            super().key(k, gothi)
 
 
 class Message(Scene):
@@ -165,7 +204,7 @@ class SettingsScene(Scene):
     def rows(self, gothi):
         st = gothi.settings
         return [("Color", ""), ("Screen", "tall 128x80" if st["screen"] == "tall" else "classic 128x64"),
-                ("Anim. border", "black" if st["border"] else "none")]
+                ("Anim. border", "black" if st["border"] else "none"), ("Dolphin level", str(st["level"]))]
 
     def draw(self, c, gothi):
         c.text(2, 2, "Settings")
@@ -195,10 +234,19 @@ class SettingsScene(Scene):
             elif self.sel == 2:
                 st["border"] = not st["border"]
                 st.save()
+            elif self.sel == 3:
+                st["level"] = st["level"] % 3 + 1
+                st.save()
             elif k == keys.LEFT:
                 gothi.pop()
         elif k == keys.BACK:
             gothi.pop()
+
+
+def dolphin(gothi):
+    if not os.path.exists(os.path.join(flipper.ASSETS, "dolphin", "external", "manifest.txt")):
+        return Message("Dolphin", ["no graphics found", "run tools/fetch-", "assets.sh"])
+    return Dolphin()
 
 
 def main_menu():
@@ -206,6 +254,7 @@ def main_menu():
     return Menu("gothi", [
         ("Clock", lambda g: Clock(), mm + "Plugins_14"),
         ("Battery", lambda g: Battery(), "icons/Power/Battery_16x16.png"),
+        ("Dolphin", dolphin),
         ("Animations", animations, mm + "FileManager_14"),
         ("Key test", lambda g: Keys(), mm + "Debug_14"),
         ("Settings", lambda g: SettingsScene(), mm + "Settings_14"),

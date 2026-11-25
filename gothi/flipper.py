@@ -133,6 +133,7 @@ class Animation:
         self.path = path
         self.name = os.path.basename(path.rstrip("/"))
         self.frame_rate, self.order, self.bubbles = 2, None, []
+        self.passive, self.active, self.cycles, self.duration, self.cooldown = 0, 0, 1, 0, 0
         meta, rate = os.path.join(path, "meta.txt"), os.path.join(path, "frame_rate")
         if os.path.exists(meta):
             cur = None
@@ -141,6 +142,16 @@ class Animation:
                     self.frame_rate = max(1, int(v))
                 elif k == "Frames order":
                     self.order = [int(x) for x in v.split()]
+                elif k == "Passive frames":
+                    self.passive = int(v)
+                elif k == "Active frames":
+                    self.active = int(v)
+                elif k == "Active cycles":
+                    self.cycles = max(1, int(v))
+                elif k == "Duration":
+                    self.duration = int(v)
+                elif k == "Active cooldown":
+                    self.cooldown = int(v)
                 elif k == "Slot":
                     cur = {}
                     self.bubbles.append(cur)
@@ -161,6 +172,64 @@ class Animation:
     def frame_at(self, t):
         """The frame to show `t` seconds after the start (the animation loops)."""
         return self.frames[self.order[int(t * self.frame_rate) % len(self.order)]]
+
+
+class Playback:
+    """The life of one dolphin animation: the passive frames loop; `activate()` (the user does something) plays the active frames `Active cycles` times,
+    then the passive ones again and a cooldown of `Active cooldown` seconds before the next activation. `at(now)` gives (frame, position in `Frames order`);
+    the position selects the speech bubbles (StartFrame..EndFrame). An animation without Passive/Active frames (an icon) just loops."""
+
+    def __init__(self, anim, now):
+        self.anim = anim
+        order = anim.order
+        self.passive_seq = order[:anim.passive] if anim.passive else order
+        self.active_seq = order[anim.passive:anim.passive + anim.active] if anim.passive else []
+        self.state, self.t0, self.cooldown_until, self.cycles = "passive", now, 0.0, 0
+
+    def activate(self, now):
+        if self.state == "passive" and self.active_seq and now >= self.cooldown_until:
+            self.state, self.t0, self.cycles = "active", now, self.anim.cycles
+            return True
+        return False
+
+    def at(self, now):
+        a = self.anim
+        i = int((now - self.t0) * a.frame_rate)
+        if self.state == "active":
+            if i >= self.cycles * len(self.active_seq):
+                self.state, self.t0, self.cooldown_until = "passive", now, now + a.cooldown
+                return self.at(now)
+            k = i % len(self.active_seq)
+            return a.frames[self.active_seq[k]], len(self.passive_seq) + k
+        k = i % len(self.passive_seq)
+        return a.frames[self.passive_seq[k]], k
+
+    def bubbles(self, pos):
+        return [b for b in self.anim.bubbles if b.get("StartFrame", 0) <= pos <= b.get("EndFrame", -1)]
+
+
+def draw_bubble(c, b, ox=0, oy=0):
+    """A speech bubble of a Slot of meta.txt: a box with rounded corners around the text (lines split at \\n); X, Y is the anchor, AlignH / AlignV tell
+    on which side of it the box lies (Left: the box starts at X, Right: ends at X, Center: centred; Bottom: the box ends at Y, Top: starts at Y). A short
+    tail points at the anchor. An approximation of elements_bubble_str of the firmware."""
+    lines = b.get("Text", "").split("\n")
+    w = max(c.text_width(t) for t in lines) + 6
+    h = 7 * len(lines) + 4
+    x, y = b.get("X", 0) + ox, b.get("Y", 0) + oy
+    ah, av = b.get("AlignH", "Left"), b.get("AlignV", "Bottom")
+    bx = x if ah == "Left" else (x - w if ah == "Right" else x - w // 2)
+    by = y - h if av == "Bottom" else (y if av == "Top" else y - h // 2)
+    c.box(bx, by, w, h, 0)
+    c.frame(bx, by, w, h)
+    for cx, cy in ((bx, by), (bx + w - 1, by), (bx, by + h - 1), (bx + w - 1, by + h - 1)):      # rounded corners
+        c.pixel(cx, cy, 0)
+    for i, t in enumerate(lines):
+        c.text(bx + 3, by + 3 + i * 7, t)
+    if av in ("Bottom", "Top"):                                                                 # the tail
+        ty = by + h if av == "Bottom" else by - 3
+        tx = bx + 3 if ah != "Right" else bx + w - 6
+        for k in range(3):
+            c.hline(tx + (k if av == "Top" else 0), ty + k if av == "Bottom" else ty + 2 - k, 3 - k, 1)
 
 
 def read_manifest(path):
@@ -194,6 +263,15 @@ def load_icon(rel):
         except (OSError, ValueError, KeyError):
             _icons[rel] = None
     return _icons[rel]
+
+
+def pick(manifest, level, rng, butthurt=0):
+    """A random animation name of a manifest by Weight among those that fit the level (Min/Max level) and butthurt (Min/Max butthurt)."""
+    ok = [m for m in manifest if int(m.get("Min level", 1)) <= level <= int(m.get("Max level", 99))
+          and int(m.get("Min butthurt", 0)) <= butthurt <= int(m.get("Max butthurt", 99))]
+    if not ok:
+        ok = manifest                      # nothing fits the level: any animation is better than none
+    return rng.choices([m["Name"] for m in ok], weights=[max(1, int(m.get("Weight", 1))) for m in ok])[0]
 
 
 def blit(c, image, x, y, scale=1, v=1):

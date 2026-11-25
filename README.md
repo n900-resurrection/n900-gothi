@@ -6,7 +6,7 @@ It is not an emulator of the Flipper and has none of its radios (Sub-GHz, NFC, R
 
 Successor of [RPi_Zero_Gothi](https://github.com/elPytel/RPi_Zero_Gothi) (Raspberry Pi Zero with an OLED HAT).
 
-> **MVP.** Works on the N900 and on the PC: the menu with the firmware icons, a clock, battery data, a key test, a player of the firmware animations, settings (colour, screen size), a `.deb` package. Everything else is still to do.
+> **MVP.** Works on the N900 and on the PC: the menu with the firmware icons, a clock, battery data, a key test, a **Dolphin** (the animations of the firmware as on the Flipper desktop: picked by weight and level, passive and active frames, speech bubbles; **OK** = the dolphin acts, **Right** = the next one), a player of single animations, settings (colour, screen size), a `.deb` package. Everything else is still to do.
 
 ## Two ways to control it
 
@@ -43,7 +43,7 @@ For development, without a package: `./tools/deploy-n900.sh` copies the source t
 
 ## Next
 
-Speech bubbles of the animations, Wi-Fi scan, GPS, FM, USB OTG modules; see the [issues](https://github.com/n900-resurrection/n900-gothi/issues).
+Wi-Fi scan, GPS, FM, USB OTG modules; see the [issues](https://github.com/n900-resurrection/n900-gothi/issues).
 
 ## Licence
 

@@ -1,6 +1,7 @@
 """Tests of the core, no display needed:  python3 -m unittest discover -s tests"""
 import os
 import sys
+import random
 import struct
 import tempfile
 import unittest
@@ -170,6 +171,46 @@ class FlipperTest(unittest.TestCase):
             self.assertEqual(an.bubbles[0]["Text"], "Hi\nthere")
             self.assertEqual(list(an.frame_at(0).px), [1, 1, 1, 1])        # order[0] = frame 1 (all dark)
             self.assertEqual(list(an.frame_at(0.6).px), [0, 0, 0, 0])      # 0.6 s at 2 fps = index 1 -> frame 0
+
+    def make_dolphin(self, d, frames=5):
+        a = os.path.join(d, "L1_Dog_8x1")
+        os.mkdir(a)
+        for i in range(frames):
+            open(os.path.join(a, f"frame_{i}.png"), "wb").write(png(8, 1, [bytes([1 << i])]))
+        open(os.path.join(a, "meta.txt"), "w").write(
+            "Filetype: Flipper Animation\nWidth: 8\nHeight: 1\nPassive frames: 3\nActive frames: 2\nFrames order: 0 1 2 3 4\n"
+            "Active cycles: 2\nFrame rate: 1\nDuration: 60\nActive cooldown: 5\nBubble slots: 1\nSlot: 0\nX: 4\nY: 20\nText: Woof\n"
+            "AlignH: Left\nAlignV: Bottom\nStartFrame: 1\nEndFrame: 3\n")
+        return flipper.Animation(a)
+
+    def test_playback_passive_active_cooldown(self):
+        with tempfile.TemporaryDirectory() as d:
+            pb = flipper.Playback(self.make_dolphin(d), 100.0)
+            self.assertEqual([pb.at(100 + t)[1] for t in (0, 1, 2, 3, 4)], [0, 1, 2, 0, 1])     # passive loops
+            self.assertTrue(pb.activate(110.0))
+            self.assertEqual([pb.at(110 + t)[1] for t in (0, 1, 2, 3)], [3, 4, 3, 4])          # active part, 2 cycles
+            self.assertEqual(pb.at(114.0)[1], 0)                                                   # 2 cycles of 2 frames are over: passive again
+            self.assertEqual(pb.state, "passive")
+            self.assertFalse(pb.activate(118.0))                                                   # cooldown of 5 s, counted from 114
+            self.assertTrue(pb.activate(119.5))
+
+    def test_bubbles_by_position_and_drawing(self):
+        with tempfile.TemporaryDirectory() as d:
+            an = self.make_dolphin(d)
+            pb = flipper.Playback(an, 0.0)
+            self.assertEqual(pb.bubbles(0), [])
+            self.assertEqual(pb.bubbles(2)[0]["Text"], "Woof")
+            self.assertEqual(pb.bubbles(4), [])
+            c = Canvas()
+            flipper.draw_bubble(c, an.bubbles[0], 0, 10)
+            self.assertGreater(sum(c.px), 20)
+
+    def test_pick_by_level_and_weight(self):
+        m = [{"Name": "A", "Min level": "1", "Max level": "1", "Weight": "1"}, {"Name": "B", "Min level": "2", "Max level": "3", "Weight": "5"}]
+        rng = random.Random(1)
+        self.assertEqual({flipper.pick(m, 1, rng) for _ in range(20)}, {"A"})
+        self.assertEqual({flipper.pick(m, 3, rng) for _ in range(20)}, {"B"})
+        self.assertIn(flipper.pick(m, 9, rng), ("A", "B"))                                         # nothing fits: any
 
     def test_manifest(self):
         with tempfile.TemporaryDirectory() as d:
