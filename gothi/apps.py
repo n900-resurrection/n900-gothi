@@ -11,6 +11,7 @@ from .ui import Menu, Scene
 
 class Clock(Scene):
     title = "Clock"
+    deed_name = "clock_view"
 
     def draw(self, c, gothi):
         t = time.localtime()
@@ -22,6 +23,7 @@ class Clock(Scene):
 
 class Battery(Scene):
     title = "Battery"
+    deed_name = "battery_view"
 
     def draw(self, c, gothi):
         c.text(2, 2, "Battery")
@@ -46,6 +48,7 @@ class Battery(Scene):
 class Keys(Scene):
     """Shows the last keys, to try the keyboard and the touch buttons."""
     title = "Key test"
+    deed_name = "key_test"
 
     def __init__(self):
         self.last = []
@@ -65,6 +68,7 @@ class Keys(Scene):
 
 class About(Scene):
     title = "About"
+    deed_name = "about_view"
 
     def draw(self, c, gothi):
         c.text(2, 2, "About")
@@ -77,6 +81,8 @@ class About(Scene):
 
 class Player(Scene):
     """Plays one animation of the firmware: passive frames in a loop, OK plays the active part, the speech bubbles of its meta.txt."""
+
+    deed_name = "animation_view"
 
     def __init__(self, path):
         self.anim, self.play = flipper.Animation(path), None
@@ -103,8 +109,10 @@ class Player(Scene):
 
 
 class Dolphin(Player):
-    """Like the desktop of the Flipper: animations of the firmware picked by their weight and the level of the dolphin (Settings), one after another.
+    """Like the desktop of the Flipper: animations of the firmware picked by their weight and the level and mood (butthurt) of the dolphin, one after another.
     Right = the next one, OK = the dolphin does its active part, Back = out."""
+
+    deed_name = None                       # the dolphin on the desktop earns its XP by being petted (OK), not by being looked at
 
     def __init__(self, rng=None):
         self.rng = rng or random.Random()
@@ -113,7 +121,7 @@ class Dolphin(Player):
         self.until = 0
 
     def next(self, gothi, now):
-        name = flipper.pick(self.manifest, gothi.settings["level"], self.rng)
+        name = flipper.pick(self.manifest, gothi.dolphin.level, self.rng, gothi.dolphin.mood(gothi.settings["happy"]))
         self.anim = flipper.Animation(os.path.join(flipper.ASSETS, "dolphin", "external", name))
         self.play = flipper.Playback(self.anim, now)
         self.until = now + min(self.anim.duration or 60, 180)         # Duration is the time on the screen (the firmware: up to an hour), shortened
@@ -126,6 +134,9 @@ class Dolphin(Player):
     def key(self, k, gothi):
         if k == keys.RIGHT:
             self.anim = None
+        elif k == keys.OK and self.play:
+            gothi.deed("dolphin_active")
+            super().key(k, gothi)
         else:
             super().key(k, gothi)
 
@@ -139,6 +150,28 @@ class Message(Scene):
         c.hline(0, 9, c.w)
         for i, s in enumerate(self.lines):
             c.text(4, 16 + i * 8, s)
+
+
+class Stats(Scene):
+    """The character: level, XP to the next level, mood (butthurt) and the XP earned today in each group."""
+    title = "Dolphin stats"
+    deed_name = "stats_view"
+
+    def draw(self, c, gothi):
+        d = gothi.dolphin
+        c.text(2, 2, "Dolphin stats")
+        c.hline(0, 9, c.w)
+        c.text(4, 14, f"Level {d.level}" + ("" if d.level < d.max_level else " (max)"))
+        got, need = d.xp_in_level()
+        c.text(4, 24, f"XP {d.xp}" + ("" if need is None else f" / {d.thresholds[d.level - 1]}"))
+        c.frame(4, 33, 120, 7)
+        c.box(5, 34, 118 if need is None else min(118, 118 * got // max(1, need)), 5)
+        happy = gothi.settings["happy"]
+        c.text(4, 44, "Mood")
+        c.text(36, 44, "always happy" if happy else f"butthurt {d.butthurt} / {d.rules['butthurt']['max']}")
+        if gothi.h > 64:
+            for i, g in enumerate(sorted({v["group"] for v in d.rules["deeds"].values()})[:4]):
+                c.text(4, 54 + i * 8, f"{g}: {d.group_xp.get(g, 0)} / {d.limit(g)} today")
 
 
 def animations(gothi):
@@ -204,7 +237,7 @@ class SettingsScene(Scene):
     def rows(self, gothi):
         st = gothi.settings
         return [("Color", ""), ("Screen", "tall 128x80" if st["screen"] == "tall" else "classic 128x64"),
-                ("Anim. border", "black" if st["border"] else "none"), ("Dolphin level", str(st["level"]))]
+                ("Anim. border", "black" if st["border"] else "none"), ("Happy mode", "on" if st["happy"] else "off")]
 
     def draw(self, c, gothi):
         c.text(2, 2, "Settings")
@@ -231,12 +264,15 @@ class SettingsScene(Scene):
                 st["screen"] = "classic" if st["screen"] == "tall" else "tall"
                 gothi.h = st.height
                 st.save()
+                gothi.deed("settings_change")
             elif self.sel == 2:
                 st["border"] = not st["border"]
                 st.save()
+                gothi.deed("settings_change")
             elif self.sel == 3:
-                st["level"] = st["level"] % 3 + 1
+                st["happy"] = not st["happy"]
                 st.save()
+                gothi.deed("settings_change")
             elif k == keys.LEFT:
                 gothi.pop()
         elif k == keys.BACK:
@@ -255,6 +291,7 @@ def main_menu():
         ("Clock", lambda g: Clock(), mm + "Plugins_14"),
         ("Battery", lambda g: Battery(), "icons/Power/Battery_16x16.png"),
         ("Dolphin", dolphin),
+        ("Dolphin stats", lambda g: Stats(), mm + "iButton_14"),
         ("Animations", animations, mm + "FileManager_14"),
         ("Key test", lambda g: Keys(), mm + "Debug_14"),
         ("Settings", lambda g: SettingsScene(), mm + "Settings_14"),

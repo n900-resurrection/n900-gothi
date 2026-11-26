@@ -3,7 +3,7 @@
 #   make -C apps/n900-gothi build
 # Output: /project/build/out/n900-gothi-$VERSION/{lib/gothi, share/flipper, share/doc}
 set -euo pipefail
-VERSION="${VERSION:-0.2.0}"
+VERSION="${VERSION:-0.3.0}"
 PROJ=/project
 HERE="$PROJ/apps/n900-gothi"
 OUT="$PROJ/build/out/n900-gothi-$VERSION"

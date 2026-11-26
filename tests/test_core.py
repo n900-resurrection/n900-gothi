@@ -12,6 +12,8 @@ from gothi import flipper, keys  # noqa: E402
 from gothi.apps import Clock, main_menu  # noqa: E402
 from gothi.canvas import Canvas  # noqa: E402
 from gothi.apps import ColorScene, SettingsScene  # noqa: E402
+from gothi import dolphin as dol  # noqa: E402
+from gothi.apps import Stats  # noqa: E402
 from gothi.settings import Settings  # noqa: E402
 from gothi.ui import Gothi, Menu  # noqa: E402
 
@@ -232,3 +234,125 @@ class FlipperTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+DAY = 86400
+T0 = 1_800_000_000 + 12 * 3600        # some day around noon (local time zone only moves the 05:00 limit by hours)
+
+
+def mk(**over):
+    r = dol.load_rules(user_path=os.devnull)
+    r.update(over)
+    return dol.DolphinState(r, path="", now=T0)
+
+
+class DolphinTest(unittest.TestCase):
+    def test_shipped_rules_are_valid(self):
+        r = dol.load_rules(user_path=os.devnull)
+        self.assertEqual(r["levels"], [300, 1800])
+        self.assertEqual(r["butthurt"]["increase_hours"], 48)
+
+    def test_levels_follow_the_firmware(self):
+        d = mk()
+        for xp, lv in ((0, 1), (300, 1), (301, 2), (1800, 2), (1801, 3), (99999, 3)):
+            d.xp = xp
+            self.assertEqual(d.level, lv, xp)
+        d.xp = 100
+        self.assertEqual(d.xp_to_levelup(), 200)
+        d.xp = 5000
+        self.assertIsNone(d.xp_to_levelup())
+
+    def test_xp_stops_at_threshold_until_confirmed(self):
+        d = mk(default_limit=1000)
+        d.xp = 299
+        self.assertEqual(d.deed("dolphin_active", T0), 1)         # weight 2, one XP to the threshold
+        self.assertTrue(d.levelup_pending())
+        self.assertEqual(d.deed("dolphin_active", T0), 0)
+        self.assertTrue(d.confirm_levelup())
+        self.assertEqual(d.level, 2)
+        self.assertEqual(d.deed("dolphin_active", T0), 2)
+
+    def test_daily_limit_per_group_and_reset_at_five(self):
+        d = mk()
+        self.assertEqual(sum(d.deed("dolphin_active", T0) for _ in range(30)), 20)
+        self.assertEqual(d.deed("clock_view", T0), 1)             # another group
+        self.assertEqual(d.deed("dolphin_active", T0 + DAY), 2)                    # the next day
+        self.assertEqual(d.deed("nonsense", T0), 0)
+
+    def test_butthurt_grows_every_48_hours_and_is_capped(self):
+        d = mk()
+        d.update(T0 + 47 * 3600)
+        self.assertEqual(d.butthurt, 0)
+        d.update(T0 + 49 * 3600)
+        self.assertEqual(d.butthurt, 1)
+        d.update(T0 + 49 * 3600 + 10 * 48 * 3600)
+        self.assertEqual(d.butthurt, 11)
+        d.update(T0 + 400 * DAY)
+        self.assertEqual(d.butthurt, 14)
+        d.update(T0)                                              # the clock went back: no crash, no change
+        self.assertEqual(d.butthurt, 14)
+
+    def test_deeds_lower_butthurt_in_steps_at_most_four_a_day(self):
+        d = mk(default_limit=1000)
+        d.butthurt = 10
+        gains = [d.deed("dolphin_active", T0) for _ in range(40)]       # 80 XP
+        self.assertEqual(sum(gains), 80)
+        self.assertEqual(d.butthurt, 6)
+        d.butthurt = 10
+        d.deed("dolphin_active", T0 + DAY)                              # the next day: one more step (the first XP)
+        self.assertEqual(d.butthurt, 9)
+
+    def test_happy_mode_hides_butthurt(self):
+        d = mk()
+        d.butthurt = 9
+        self.assertEqual((d.mood(False), d.mood(True), d.butthurt), (9, 0, 9))
+
+    def test_state_is_saved_and_loaded(self):
+        with tempfile.TemporaryDirectory() as t:
+            p = os.path.join(t, "x", "state.json")
+            d = dol.DolphinState(dol.load_rules(user_path=os.devnull), p, T0)
+            d.deed("clock_view", T0)
+            d.save()
+            d2 = dol.DolphinState(dol.load_rules(user_path=os.devnull), p, T0)
+            self.assertEqual((d2.xp, d2.group_xp), (1, {"tools": 1}))
+            open(p, "w").write("{broken")
+            self.assertEqual(dol.DolphinState(dol.load_rules(user_path=os.devnull), p, T0).xp, 0)
+
+    def test_user_rules_override_and_broken_ones_are_ignored(self):
+        with tempfile.TemporaryDirectory() as t:
+            p = os.path.join(t, "rules.json")
+            open(p, "w").write('{"levels": [10, 20, 30], "deeds": {"clock_view": {"xp": 5}, "my_deed": {"group": "mine", "xp": 3}}}')
+            r = dol.load_rules(p)
+            self.assertEqual((r["levels"], r["deeds"]["clock_view"], r["deeds"]["battery_view"]["xp"], r["deeds"]["my_deed"]["xp"]), ([10, 20, 30], {"group": "tools", "xp": 5}, 1, 3))
+            for bad in ('{"levels": [20, 10]}', '{"levels": []}', "nonsense", '{"deeds": {"x": {"xp": -1, "group": "g"}}}'):
+                open(p, "w").write(bad)
+                self.assertEqual(dol.load_rules(p)["levels"], [300, 1800], bad)
+
+    def test_levelup_message_and_deed_by_scene(self):
+        r = dol.load_rules(user_path=os.devnull)
+        st = dol.DolphinState(r, "", T0)
+        st.xp = 299
+        g = Gothi(main_menu(), Settings(os.devnull), st)
+        g.top.sel = 0
+        g.key(keys.OK)                                            # Clock: +1 -> threshold -> level 2
+        self.assertEqual((st.xp, st.level), (301, 2))
+        self.assertEqual(g.top.title, "Level up!")
+        g.key(keys.BACK)
+        g.key(keys.BACK)
+        self.assertEqual(g.top.__class__.__name__, "Menu")
+
+    def test_stats_scene_draws_and_happy_switch(self):
+        with tempfile.TemporaryDirectory() as t:
+            g = Gothi(SettingsScene(), Settings(os.path.join(t, "s.json")))
+            for _ in range(3):
+                g.key(keys.DOWN)
+            g.key(keys.OK)
+            self.assertTrue(g.settings["happy"])
+            self.assertEqual(Settings(os.path.join(t, "s.json"))["happy"], True)
+            for tall in (False, True):
+                g.settings["screen"] = "tall" if tall else "classic"
+                g.h = g.settings.height
+                c = Canvas(h=g.h)
+                g.stack = [Stats()]
+                g.draw(c)
+                self.assertGreater(sum(c.px), 50)

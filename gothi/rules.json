@@ -1,0 +1,21 @@
+{
+  "levels": [300, 1800],
+  "clear_limits_hour": 5,
+  "default_limit": 20,
+  "limits": {},
+  "butthurt": {
+    "max": 14,
+    "increase_hours": 48,
+    "decrease_at": [1, 16, 31, 46]
+  },
+  "deeds": {
+    "clock_view":      {"group": "tools",    "xp": 1},
+    "battery_view":    {"group": "tools",    "xp": 1},
+    "key_test":        {"group": "tools",    "xp": 1},
+    "about_view":      {"group": "tools",    "xp": 1},
+    "stats_view":      {"group": "tools",    "xp": 1},
+    "animation_view":  {"group": "dolphin",  "xp": 1},
+    "dolphin_active":  {"group": "dolphin",  "xp": 2},
+    "settings_change": {"group": "settings", "xp": 1}
+  }
+}

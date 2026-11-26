@@ -8,6 +8,7 @@ from . import flipper, keys, sysinfo
 
 class Scene:
     title = ""
+    deed_name = None           # the deed (rules.json) the dolphin gets for opening this scene
 
     def draw(self, c, gothi):
         pass
@@ -16,17 +17,39 @@ class Scene:
         if k == keys.BACK:
             gothi.pop()
 
+    def on_enter(self, gothi):
+        """Called when the scene is pushed: by default it reports the deed named in `deed_name`."""
+        if self.deed_name:
+            gothi.deed(self.deed_name)
+
     def tick(self, now, gothi):
         pass
 
 
 class Gothi:
-    def __init__(self, root, settings=None):
+    def __init__(self, root, settings=None, dolphin=None):
+        from .dolphin import DolphinState
         from .settings import Settings
         self.stack = [root]
         self.mode = "keyboard"             # set by the frontend: "keyboard" or "touch"
         self.settings = settings or Settings(path=os.devnull)
         self.h = self.settings.height      # rows of the screen, set by the frontend when it changes
+        self.dolphin = dolphin or DolphinState(path="")      # the character: XP and butthurt (without a file unless given)
+        self._levelups = []
+        self._checked = 0
+
+    def deed(self, name):
+        """The dolphin did something worth XP. A level-up is confirmed at once and announced by a message on top of the stack at the next key or tick."""
+        if self.dolphin.deed(name):
+            if self.dolphin.levelup_pending():
+                self.dolphin.confirm_levelup()
+                self._levelups.append(self.dolphin.level)
+            self.dolphin.save()
+
+    def _announce(self):
+        from .apps import Message
+        while self._levelups:
+            self.stack.append(Message("Level up!", [f"The dolphin is now", f"level {self._levelups.pop(0)}"]))
 
     @property
     def top(self):
@@ -34,6 +57,7 @@ class Gothi:
 
     def push(self, scene):
         self.stack.append(scene)
+        scene.on_enter(self)
 
     def pop(self):
         if len(self.stack) > 1:
@@ -41,9 +65,15 @@ class Gothi:
 
     def key(self, k):
         self.top.key(k, self)
+        self._announce()
 
     def tick(self, now):
         self.top.tick(now, self)
+        if now - self._checked > 60:                       # the day and the butthurt move slowly
+            self._checked = now
+            if self.dolphin.update(now):
+                self.dolphin.save()
+        self._announce()
 
     def draw(self, c):
         c.clear()

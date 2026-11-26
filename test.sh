@@ -15,5 +15,7 @@ contains animation-loads "frames" sh -c 'PYTHONPATH=/opt/gothi/lib GOTHI_ASSETS=
 from gothi import flipper
 a = flipper.load_icon(\"dolphin/external/L1_Boxing_128x64\")
 print(len(a.frames), \"frames\")"'
-contains settings-saved "color" sh -c 'SDL_VIDEODRIVER=dummy /usr/bin/gothi --frames 20 --keys down,down,down,down,down,ok,down,right,back,back >/dev/null 2>&1; cat '$TESTDIR'/.config/gothi/settings.json'
+contains settings-saved "color" sh -c 'SDL_VIDEODRIVER=dummy /usr/bin/gothi --frames 20 --keys down,down,down,down,down,down,ok,down,right,back,back >/dev/null 2>&1; cat '$TESTDIR'/.config/gothi/settings.json'
+contains dolphin-state-saved "\"tools\": 1" sh -c 'rm -f '$TESTDIR'/.config/gothi/dolphin-state.json; SDL_VIDEODRIVER=dummy /usr/bin/gothi --frames 6 --keys ok,back >/dev/null 2>&1; cat '$TESTDIR'/.config/gothi/dolphin-state.json'
+contains rules-shipped "rules.json" sh -c '/usr/bin/gothi --rules'
 summary
