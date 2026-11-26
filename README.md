@@ -20,6 +20,16 @@ Successor of [RPi_Zero_Gothi](https://github.com/elPytel/RPi_Zero_Gothi) (Raspbe
 
 *(Rendered on a computer with the same code; the modules in the last row use made-up values.)*
 
+## Touching the screen itself
+
+With **Settings > Tap the screen** on (off by default: a palm on a phone held with both hands must not press things) a finger works on the screen itself, in both layouts (also with the keyboard slid out):
+
+- **Lists:** a tap selects a row, a tap on the selected row opens it (like OK); a **drag** scrolls the list; a tap on the **title bar** is Back. In a list of buttons for a remote control (the `gothi-ir` module) one tap sends.
+- **Settings:** the same; on the colour page a tap on a bar sets the channel there.
+- **Switches and levels:** a tap on the big ON/OFF toggles; on the `< value >` line the left and the right end change the number; a tap on the bar of a level sets it; the question before a start is answered with the left (yes) or the right (no) half of its last line; the lines under the state scroll with a drag.
+- **Dolphin:** a tap pets it, the right edge shows the next animation. A message closes with a tap. **Key test** shows where the finger was.
+- Taps and drags are told apart by a threshold of 3 canvas pixels (18 on the display), so the jitter of the resistive screen does not scroll. `python3 -m gothi --keys tap:64:30,swipe:64:50:10` tries it without a finger.
+
 ## Two ways to control it
 
 | Keyboard slid out | Keyboard closed |

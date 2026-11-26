@@ -13,11 +13,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from gothi import flipper, keys  # noqa: E402
 from gothi.apps import Clock, main_menu  # noqa: E402
 from gothi.canvas import Canvas  # noqa: E402
-from gothi.apps import ColorScene, SettingsScene  # noqa: E402
+from gothi.apps import ColorScene, Keys, Message, SettingsScene  # noqa: E402
 from gothi import dolphin as dol  # noqa: E402
 from gothi.apps import Stats  # noqa: E402
 from gothi import modules as mod  # noqa: E402
-from gothi.settings import Settings  # noqa: E402
+from gothi.settings import PRESETS, Settings  # noqa: E402
 from gothi.ui import Gothi, Menu  # noqa: E402
 
 
@@ -709,7 +709,7 @@ class LevelTest(unittest.TestCase):
         sm = [m for m in mods if m.menu == "settings"]
         g = Gothi(SettingsScene(sm), Settings(os.devnull))
         n = len(g.top.rows(g))
-        self.assertEqual(n, 4 + len(sm))
+        self.assertEqual(n, 5 + len(sm))
         seen = set()
         for _ in range(n):
             c = Canvas()
@@ -717,7 +717,7 @@ class LevelTest(unittest.TestCase):
             seen.add(bytes(c.px))
             g.key(keys.DOWN)
         self.assertGreater(len(seen), 3)                                             # the list scrolled
-        g.stack[0].sel = 4
+        g.stack[0].sel = 5
         g.key(keys.OK)
         self.assertIn(g.top.__class__.__name__, ("Level", "Switch"))
         g.draw(Canvas())
@@ -1014,3 +1014,305 @@ class PythonModuleTest(unittest.TestCase):
     def test_entry_must_be_a_plain_file_next_to_the_manifest(self):
         for bad in ("../module.py", "sub/module.py", "module.txt", "", None, 5, "nothere.py"):
             self.assertEqual(len(self.mk("def create(m): pass\n", entry=bad)[1]), 1, bad)
+
+
+def tap(g, x, y):
+    g.touch("down", x, y)
+    g.touch("up", x, y)
+
+
+def swipe(g, x, y0, y1, steps=4):
+    g.touch("down", x, y0)
+    for i in range(1, steps + 1):
+        g.touch("move", x, y0 + (y1 - y0) * i // steps)
+    g.touch("up", x, y1)
+
+
+def touch_gothi(root, on=True, h=None):
+    st = Settings(os.devnull)
+    st["touch_screen"] = on
+    if h:
+        st["screen"] = "tall"
+    g = Gothi(root, st)
+    return g
+
+
+class TouchScreenTest(unittest.TestCase):
+    def menu(self, n=10, **kw):
+        opened = []
+        items = [(f"Item {i}", (lambda gg, i=i: opened.append(i) or Menu(f"Sub {i}", []))) for i in range(n)]
+        m = Menu("Main", items, **kw)
+        return m, opened
+
+    def test_nothing_happens_when_the_setting_is_off(self):
+        m, opened = self.menu()
+        g = touch_gothi(Menu("root", [("m", lambda gg: m)]), on=False)
+        g.key(keys.OK)
+        tap(g, 40, 14)
+        tap(g, 40, 14)
+        swipe(g, 40, 50, 10)
+        tap(g, 40, 3)
+        self.assertEqual((opened, m.sel, m.top_row, g.top is m), ([], 0, 0, True))
+
+    def test_menu_first_tap_selects_second_opens_and_the_title_is_back(self):
+        m, opened = self.menu()
+        g = touch_gothi(Menu("root", [("m", lambda gg: m)]))
+        g.key(keys.OK)
+        tap(g, 40, 14 + 12 * 2)                                  # the third row
+        self.assertEqual((m.sel, opened), (2, []))
+        tap(g, 40, 14 + 12 * 2)
+        self.assertEqual((opened, g.top.title), ([2], "Sub 2"))
+        tap(g, 20, 4)                                            # the title bar: Back
+        self.assertIs(g.top, m)
+        tap(g, 40, 6)                                            # again from the menu: Back to the root
+        self.assertEqual(g.top.title, "root")
+
+    def test_taps_between_rows_and_below_the_last_do_nothing(self):
+        m, opened = self.menu(n=2)
+        g = touch_gothi(m)
+        tap(g, 40, 11)                                           # between the title bar and the first row
+        self.assertEqual(m.sel, 0)
+        tap(g, 40, 12 + 12 * 3)                                  # no fourth item
+        self.assertEqual((m.sel, opened), (0, []))
+        tap(g, 40, 60)
+        self.assertEqual(m.sel, 0)
+
+    def test_tap_activates_opens_at_once(self):
+        m, opened = self.menu()
+        m.tap_activates = True
+        g = touch_gothi(m)
+        tap(g, 40, 14 + 12)
+        self.assertEqual(opened, [1])
+
+    def test_small_movement_is_still_a_tap_and_a_drag_is_not(self):
+        m, opened = self.menu()
+        g = touch_gothi(m)
+        g.touch("down", 40, 26)
+        g.touch("move", 41, 27)                                  # a resistive screen jitters
+        g.touch("move", 40, 25)
+        g.touch("up", 40, 26)
+        self.assertEqual(m.sel, 1)
+        swipe(g, 40, 40, 10)                                     # a real drag: no tap at the end
+        self.assertEqual(m.sel, 1 if m.top_row == 0 else m.sel)
+        self.assertGreater(m.top_row, 0)
+
+    def test_drag_scrolls_the_list_and_keeps_the_selection_visible(self):
+        m, _ = self.menu(n=12)
+        g = touch_gothi(m)
+        swipe(g, 40, 50, 14, steps=6)                            # up by 36 px = three rows of 12
+        self.assertEqual(m.top_row, 3)
+        self.assertTrue(m.top_row <= m.sel < m.top_row + 4)
+        swipe(g, 40, 14, 120, steps=10)                          # a long way down: stops at the top
+        self.assertEqual(m.top_row, 0)
+        for _ in range(3):
+            swipe(g, 40, 60, 0, steps=20)
+        self.assertEqual(m.top_row, 12 - 4)                      # and at the end (four rows are visible)
+
+    def test_tall_screen_has_more_rows_to_tap(self):
+        m, opened = self.menu(n=10)
+        g = touch_gothi(m, h=80)
+        g.h = 80
+        tap(g, 40, 12 + 12 * 4 + 2)                              # the fifth row exists on the tall screen
+        tap(g, 40, 12 + 12 * 4 + 2)
+        self.assertEqual(opened, [4])
+
+    def test_icon_rows_are_16_pixels(self):
+        m = Menu("Icons", [(f"I{i}", (lambda gg: Menu("x", [])), "icons/MainMenu/Settings_14") for i in range(6)])
+        if m.ROW != 16:
+            self.skipTest("no firmware graphics here")
+        g = touch_gothi(m)
+        tap(g, 40, 12 + 16 + 3)
+        self.assertEqual(m.sel, 1)
+
+    def test_scrollview_follows_the_finger(self):
+        sv = Stats()
+        g = touch_gothi(sv)
+        self.assertEqual(sv.top, 0)
+        swipe(g, 40, 50, 20, steps=5)                            # 30 px = three rows of 10
+        self.assertEqual(sv.top, 3)
+        swipe(g, 40, 20, 100, steps=8)
+        self.assertEqual(sv.top, 0)
+
+    def test_settings_rows_tap_toggle_drag_and_open_a_module(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_module(t, "w", {"title": "Wifi", "type": "switch", "menu": "settings", "status": "false", "start": "true", "stop": "true"})
+            mods = mod.discover([t])[0]
+            st = Settings(os.path.join(t, "s.json"))
+            st["touch_screen"] = True
+            g = Gothi(Menu("root", [("s", lambda gg: SettingsScene(mods))]), st)
+            g.key(keys.OK)
+            sc = g.top
+            y = lambda i: 11 + 12 * i + 5
+            tap(g, 40, y(3))                                     # Happy mode: selects
+            self.assertEqual((sc.sel, st["happy"]), (3, False))
+            tap(g, 40, y(3))                                     # selected: toggles
+            self.assertTrue(st["happy"])
+            swipe(g, 40, 50, 14, steps=6)                        # scroll to the rows below
+            self.assertGreater(sc.top, 0)
+            self.assertTrue(sc.top <= sc.sel < sc.top + 4)
+            sc.top, sc.sel = 2, 5                                # the row "Wifi" is the sixth (index 5); it is the fourth visible row from top 2
+            tap(g, 40, y(3))
+            self.assertEqual(g.top.__class__.__name__, "Switch")
+            tap(g, 10, 3)
+            self.assertIs(g.top, sc)
+            # the new switch of the touch itself
+            sc.top, sc.sel = 1, 4                                # scrolled by one: "Tap the screen" is the fourth visible row
+            tap(g, 40, y(3))
+            self.assertFalse(st["touch_screen"])                 # one can switch it off by touch (and on again with the keys)
+            self.assertFalse(Settings(os.path.join(t, "s.json"))["touch_screen"])
+
+    def test_colour_bar_tap_sets_the_channel(self):
+        with tempfile.TemporaryDirectory() as t:
+            st = Settings(os.path.join(t, "s.json"))
+            st["touch_screen"] = True
+            g = Gothi(ColorScene(), st)
+            tap(g, 100, 11 + 13 * 1 + 5)                         # the red bar, near its right end
+            self.assertGreater(st.color[0], 240)
+            tap(g, 31, 11 + 13 * 2 + 5)                          # green: the left end
+            self.assertEqual(st.color[1], 0)
+            tap(g, 66, 11 + 13 * 3 + 5)                          # blue: the middle
+            self.assertTrue(120 < st.color[2] < 135)
+            tap(g, 100, 11 + 5)                                  # the preset row: right half = Right (from a custom colour: the first preset)
+            self.assertEqual(st.color, PRESETS[0][1])
+
+    def test_message_and_player_and_keys(self):
+        g = touch_gothi(Menu("root", [("m", lambda gg: Message("Hi", ["one"]))]))
+        g.key(keys.OK)
+        tap(g, 50, 30)
+        self.assertEqual(g.top.title, "root")                    # a tap closes a message
+        k = Keys()
+        g = touch_gothi(Menu("root", [("k", lambda gg: k)]))
+        g.key(keys.OK)
+        tap(g, 33, 44)
+        swipe(g, 40, 50, 10)
+        self.assertEqual(k.last[0], "tap 33,44")
+        self.assertIn("drag", k.last)
+        g.draw(Canvas())
+
+
+class TouchModuleScenesTest(unittest.TestCase):
+    def setUp(self):
+        self.t = tempfile.TemporaryDirectory()
+        self.d = self.t.name
+        self.flag = os.path.join(self.d, "on")
+        self.val = os.path.join(self.d, "val")
+        open(self.val, "w").write("50\n")
+
+    def tearDown(self):
+        self.t.cleanup()
+
+    def mk(self, kind, **over):
+        man = {"title": "T", "type": kind}
+        if kind == "switch":
+            man.update(status=f"test -f {self.flag}", start=f"touch {self.flag}", stop=f"rm -f {self.flag}", info="echo a; echo b; echo c; echo d; echo e; echo f")
+        elif kind == "level":
+            man.update(get=f"cat {self.val}", set=f"echo {{value}} > {self.val}", min=0, max=100, step=10)
+        elif kind == "action":
+            man.update(run=f"touch {self.flag}; echo ran")
+        elif kind == "ask":
+            man.update(run="echo \"answer: $GOTHI_INPUT\"")
+        man.update(over)
+        make_module(self.d, "t", man)
+        mods, errs = mod.discover([self.d])
+        self.assertEqual(errs, [], errs)
+        return mods[0]
+
+    def test_switch_taps_toggle_level_ends_confirm_and_info_drag(self):
+        m = self.mk("switch", level={"get": f"cat {self.val}", "set": f"echo {{value}} > {self.val}", "min": 0, "max": 100, "step": 10}, confirm="Sure?")
+        sc = mod.Switch(m, spawn=lambda f: f())
+        g = touch_gothi(sc)
+        sc.on_enter(g)
+        tap(g, 60, 20)                                           # the big state: asks
+        self.assertTrue(sc.asking)
+        tap(g, 100, g.h - 4)                                     # the right half of the bottom line: no
+        self.assertFalse(sc.asking)
+        self.assertFalse(os.path.exists(self.flag))
+        tap(g, 60, 20)
+        tap(g, 20, g.h - 4)                                      # yes
+        self.assertTrue(os.path.exists(self.flag))
+        tap(g, 100, 40)                                          # the right end of the level line
+        self.assertEqual(open(self.val).read().strip(), "60")
+        tap(g, 10, 40)
+        tap(g, 10, 40)
+        self.assertEqual(open(self.val).read().strip(), "40")
+        tap(g, 64, 40)                                           # the middle of the line: nothing
+        self.assertEqual(open(self.val).read().strip(), "40")
+        tap(g, 60, 20)                                           # stop needs no question
+        self.assertFalse(os.path.exists(self.flag))
+        g.h = 80
+        sc.on = True
+        sc.info = [f"l{i}" for i in range(10)]
+        swipe(g, 40, 70, 40, steps=6)
+        self.assertGreater(sc.top, 0)
+
+    def test_level_bar_and_halves(self):
+        sc = mod.Level(self.mk("level"), spawn=lambda f: f(), clock=lambda: 0.0)
+        g = touch_gothi(sc)
+        sc.on_enter(g)
+        self.assertEqual(sc.value, 50)
+        tap(g, 20, 30)
+        self.assertEqual(sc.value, 40)                           # the left half: less
+        tap(g, 100, 30)
+        tap(g, 100, 30)
+        self.assertEqual(sc.value, 60)
+        tap(g, 5, 47)                                            # the bar: the left end
+        self.assertEqual(sc.value, 0)
+        tap(g, 123, 47)
+        self.assertEqual(sc.value, 100)
+        tap(g, 64, 47)
+        self.assertEqual(sc.value, 50)
+        self.assertEqual(open(self.val).read().strip(), "50")
+        g.draw(Canvas())
+
+    def test_action_runs_on_a_tap_and_ask_answers_and_scrolls(self):
+        sc = mod.Action(self.mk("action"), spawn=lambda f: f())
+        g = touch_gothi(sc)
+        tap(g, 40, 3)                                            # the title bar: Back (nothing to go back to here)
+        self.assertFalse(os.path.exists(self.flag))
+        tap(g, 40, 30)
+        self.assertTrue(os.path.exists(self.flag))
+        self.assertEqual(sc.rc, 0)
+        a = mod.Ask(self.mk("ask", run="i=1; while [ $i -le 30 ]; do echo \"line $i of the answer\"; i=$((i+1)); done"), spawn=lambda f: f())
+        g = touch_gothi(a)
+        g.text("q")
+        tap(g, 40, 30)                                           # typing: a tap does nothing
+        self.assertEqual(a.phase, "input")
+        g.key(keys.OK)
+        swipe(g, 40, 60, 10, steps=6)
+        self.assertGreater(a.top, 0)
+        tap(g, 40, 30)                                           # a tap on the answer: ask again
+        self.assertEqual(a.phase, "input")
+
+    def test_dolphin_right_edge_is_next_and_the_rest_pets(self):
+        from gothi.apps import Dolphin
+        d = Dolphin.__new__(Dolphin)
+        got = []
+        d.key = lambda k, gg: got.append(k)
+        d.on_tap(120, 30, None)
+        d.on_tap(30, 30, None)
+        self.assertEqual(got, [keys.RIGHT, keys.OK])
+
+
+@unittest.skipIf(Layout is None, "needs PySDL2")
+class TouchMappingTest(unittest.TestCase):
+    def test_window_to_canvas_in_both_layouts(self):
+        for mode, scale in (("keyboard", 6), ("touch", 4)):
+            lay = Layout(mode)
+            x, y, w, h = lay.screen
+            self.assertEqual(lay.to_canvas(x, y), (0, 0))
+            self.assertEqual(lay.to_canvas(x + 5 * scale + 1, y + 7 * scale + 2), (5, 7))
+            self.assertEqual(lay.to_canvas(x + w - 1, y + h - 1), (127, 63))
+            self.assertIsNone(lay.to_canvas(x - 1, y))
+            self.assertIsNone(lay.to_canvas(x, y + h))
+            self.assertEqual(lay.to_canvas(x - 50, y + h + 50, clamp=True), (0, 63))            # a finger that left the screen stays on its edge
+        tall = Layout("keyboard", 80)
+        self.assertEqual(tall.to_canvas(tall.screen[0], tall.screen[1] + 79 * 6 + 1), (0, 79))
+
+
+class ScriptKeysTest(unittest.TestCase):
+    def test_main_keeps_tap_and_swipe_items_of_the_key_script(self):
+        # the script is split at commas: the items must not contain any
+        import gothi.__main__ as m
+        src = open(m.__file__).read()
+        self.assertIn('startswith(("t:", "tap:", "swipe:"))', src)
+        self.assertEqual("tap:64:30,swipe:64:50:10,ok".split(","), ["tap:64:30", "swipe:64:50:10", "ok"])

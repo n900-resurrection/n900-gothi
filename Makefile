@@ -3,7 +3,7 @@
 #   make -C apps/n900-gothi install   to the phone (install python3-pysdl2 first: make -C apps/pysdl2 install)
 override APP := n900-gothi
 PKG      := gothi
-VERSION ?= 0.10.0
+VERSION ?= 0.11.0
 RUN_CMD  := DISPLAY=:0 /usr/bin/gothi
 include ../../mk/app.mk
 

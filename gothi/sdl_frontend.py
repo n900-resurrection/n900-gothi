@@ -57,6 +57,15 @@ class Layout:
             self.buttons_order = [keys.OK, keys.UP, keys.DOWN, keys.LEFT, keys.RIGHT, keys.BACK]
         self.screen = (self.x, self.y, W * self.scale, h * self.scale)
 
+    def to_canvas(self, px, py, clamp=False):
+        """The point of the 128 x h canvas under a point of the window, None when it is outside the screen (clamp=True: the nearest point of it)."""
+        x, y, w, h = self.screen
+        if clamp:
+            px, py = min(max(px, x), x + w - 1), min(max(py, y), y + h - 1)
+        elif not (x <= px < x + w and y <= py < y + h):
+            return None
+        return (px - x) // self.scale, (py - y) // self.scale
+
     def hit(self, px, py):
         for k in getattr(self, "buttons_order", []):        # the first match wins: OK is first because it lies on top of the cross
             x, y, w, h = self.buttons[k]
@@ -85,6 +94,7 @@ class Frontend:
         self.snapshot = None
         self.down = None                                      # (key, time of the next repeat) of a held touch button
         self.typing = False                                   # SDL text input is on
+        self.finger = None                                    # the canvas point of a finger that is down on the screen
         self.running = True
 
     # ---- settings ---------------------------------------------------------
@@ -204,8 +214,20 @@ class Frontend:
             if k:
                 self.press(k)
                 self.down = (k, now + 0.4)
+            else:
+                p = self.layout.to_canvas(e.button.x, e.button.y)         # a finger on the screen itself (Settings > Tap the screen)
+                if p:
+                    self.finger = p
+                    self.gothi.touch("down", *p)
+        elif t == sdl2.SDL_MOUSEMOTION and self.finger:
+            self.finger = self.layout.to_canvas(e.motion.x, e.motion.y, clamp=True)
+            self.gothi.touch("move", *self.finger)
         elif t == sdl2.SDL_MOUSEBUTTONUP:
             self.down = None
+            if self.finger:
+                p = self.layout.to_canvas(e.button.x, e.button.y, clamp=True)
+                self.finger = None
+                self.gothi.touch("up", *p)
         elif t == sdl2.SDL_WINDOWEVENT and e.window.event in (sdl2.SDL_WINDOWEVENT_EXPOSED, sdl2.SDL_WINDOWEVENT_SHOWN):
             self.snapshot = None
 
@@ -224,6 +246,16 @@ class Frontend:
                 item = script.pop(0)
                 if item.startswith("t:"):
                     self.gothi.text(item[2:])                       # typed text (tests): t:hello\bx
+                elif item.startswith("tap:"):                       # a tap on the canvas (tests): tap:64:30
+                    x, y = (int(v) for v in item[4:].split(":"))
+                    for kind in ("down", "up"):
+                        self.gothi.touch(kind, x, y)
+                elif item.startswith("swipe:"):                     # a drag from y0 to y1 at x, in 3 steps (tests): swipe:64:50:10
+                    x, y0, y1 = (int(v) for v in item[6:].split(":"))
+                    self.gothi.touch("down", x, y0)
+                    for i in (1, 2, 3):
+                        self.gothi.touch("move", x, y0 + (y1 - y0) * i // 3)
+                    self.gothi.touch("up", x, y1)
                 else:
                     self.press(item)
             if self.down and self.down[0] in REPEAT and now >= self.down[1]:

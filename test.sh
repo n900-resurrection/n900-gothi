@@ -43,4 +43,12 @@ bluetooth_cycle() {
 contains bluetooth-cycle "bluetooth-cycle-ok" bluetooth_cycle
 # Wi-Fi: only the state is read (switching it off would cut the connection that runs this test)
 contains wifi-status "on" sh -c 'su user -c "$(PYTHONPATH=/opt/gothi/lib python3 -W ignore -c "import json; print(json.load(open(\"/opt/gothi/modules/wifi/module.json\"))[\"status\"])")" && echo on || echo off'
+# touching the screen itself: off by default (a tap does nothing), on with the setting (a tap on the first row opens the Clock, which earns a deed)
+rm -f "$HOME/.config/gothi/dolphin-state.json"
+SDL_VIDEODRIVER=dummy /usr/bin/gothi --mode keyboard --frames 8 --keys tap:40:14 >/dev/null 2>&1
+no_state_without_setting() { [ ! -e "$HOME/.config/gothi/dolphin-state.json" ] && echo untouched; }
+contains tap-ignored-when-off "untouched" no_state_without_setting
+echo '{"touch_screen": true}' > "$HOME/.config/gothi/settings.json"
+contains tap-opens-the-clock "\"tools\": 1" sh -c 'SDL_VIDEODRIVER=dummy /usr/bin/gothi --mode keyboard --frames 8 --keys tap:40:14 >/dev/null 2>&1; cat "$HOME/.config/gothi/dolphin-state.json"'
+rm -f "$HOME/.config/gothi/settings.json" "$HOME/.config/gothi/dolphin-state.json"
 summary
