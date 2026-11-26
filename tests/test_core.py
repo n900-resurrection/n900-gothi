@@ -2,6 +2,8 @@
 import os
 import sys
 import random
+import threading
+import time
 import struct
 import tempfile
 import unittest
@@ -481,6 +483,11 @@ class ModulesTest(unittest.TestCase):
             g.key(keys.UP)
         self.assertEqual(sw.top, 0)
 
+    def test_dir_placeholder_in_commands(self):
+        make_module(self.d, "srv", dict(GOOD, status="test -f {dir}/module.json"))
+        m = mod.discover([self.d])[0][0]
+        self.assertTrue(mod.run_cmd(m.cmds["status"])[0] == 0)
+
     def test_command_failures_and_timeout(self):
         self.assertEqual(mod.run_cmd("exit 3")[0], 3)
         self.assertEqual(mod.run_cmd("sleep 5", timeout=0.2), (-1, ""))
@@ -547,9 +554,9 @@ class ScrollTest(unittest.TestCase):
 
 try:
     import sdl2  # noqa: F401
-    from gothi.sdl_frontend import Layout
+    from gothi.sdl_frontend import Layout, map_key
 except ImportError:                                               # no PySDL2 on this computer: the layout is not tested
-    Layout = None
+    Layout = map_key = None
 
 
 @unittest.skipIf(Layout is None, "needs PySDL2")
@@ -729,3 +736,161 @@ class LevelTest(unittest.TestCase):
         self.assertEqual(errs, [])
         self.assertEqual({m.id for m in mods}, {"volume", "brightness", "bluetooth", "wifi"})
         self.assertTrue(all(m.menu == "settings" for m in mods))
+
+
+class MonitorTest(unittest.TestCase):
+    def mon(self, run, **over):
+        d = tempfile.mkdtemp()
+        make_module(d, "m", dict({"title": "Mon", "type": "monitor", "run": run, "deed": "mon", "deeds": {"mon": {"group": "modules", "xp": 1}}}, **over))
+        m = mod.discover([d])[0][0]
+        st = dol.DolphinState(dol.load_rules(user_path=os.devnull, extra=[{"deeds": m.deeds}]), path="", now=T0)
+        sc = mod.Monitor(m, spawn=lambda f: f())
+        return sc, Gothi(sc, Settings(os.devnull), st), st
+
+    def test_last_complete_block_is_shown_and_a_deed_given(self):
+        sc, g, st = self.mon("echo one; echo two; echo; echo three; echo four; echo")
+        g.top.on_enter(g)                                    # the command ends at once: all its output is read
+        self.assertEqual(sc.frame, ["three", "four"])
+        self.assertEqual(sc.rows(g), ["three", "four", "stopped (0)"])
+        g.tick(T0)
+        g.tick(T0)
+        self.assertEqual(st.xp, 1)                           # once
+        g.draw(Canvas())
+
+    def test_block_without_final_empty_line_and_failed_command(self):
+        sc, g, _ = self.mon("echo only; exit 3")
+        g.top.on_enter(g)
+        self.assertEqual(sc.rows(g), ["only", "stopped (3)"])
+        sc2, g2, _ = self.mon("exit 1")
+        g2.top.on_enter(g2)
+        self.assertEqual(sc2.rows(g2), ["stopped (1)"])
+
+    def test_leaving_stops_the_command_and_its_children(self):
+        flag = os.path.join(tempfile.mkdtemp(), "alive")
+        run = f"trap 'echo bye > {flag}; exit 0' TERM; echo started; echo; while true; do sleep 0.1; done"
+        sc, g, _ = self.mon(run)
+        sc.spawn = lambda f: threading.Thread(target=f, daemon=True).start()
+        g.top.on_enter(g)
+        for _ in range(50):
+            if sc.frame:
+                break
+            time.sleep(0.05)
+        self.assertEqual(sc.frame, ["started"])
+        g.stack = [Menu("root", [("m", lambda gg: sc)]), sc]
+        g.pop()                                              # leave the page
+        for _ in range(60):
+            if sc.proc.poll() is not None:
+                break
+            time.sleep(0.05)
+        self.assertIsNotNone(sc.proc.poll())
+        self.assertEqual(open(flag).read().strip(), "bye")    # it got SIGTERM and could clean up
+        self.assertNotIn(sc, mod._live)
+
+
+class AskTest(unittest.TestCase):
+    def ask(self, run="echo \"You said: $GOTHI_INPUT\"", **over):
+        d = tempfile.mkdtemp()
+        make_module(d, "a", dict({"title": "Ask", "type": "ask", "run": run, "hint": "what is it", "deed": "ask", "deeds": {"ask": {"group": "modules", "xp": 1}}}, **over))
+        m = mod.discover([d])[0][0]
+        st = dol.DolphinState(dol.load_rules(user_path=os.devnull, extra=[{"deeds": m.deeds}]), path="", now=T0)
+        sc = mod.Ask(m, spawn=lambda f: f())
+        return sc, Gothi(sc, Settings(os.devnull), st), st
+
+    def test_typing_backspace_and_limits(self):
+        sc, g, _ = self.ask()
+        g.text("hel")
+        g.text("lx")
+        g.text("\b")
+        g.text("o 'q' $x")
+        self.assertEqual(sc.text, "hello 'q' $x")
+        g.text("é")                                              # any printable character, also non-ASCII
+        g.text("\n")                                             # Enter is a key (OK), not text
+        self.assertTrue(sc.text.endswith("é"))
+        g.text("x" * 500)
+        self.assertEqual(len(sc.text), sc.MAX_QUESTION)
+        g.draw(Canvas())
+
+    def test_question_reaches_the_command_safely_and_answer_is_shown(self):
+        sc, g, st = self.ask()
+        g.key(keys.OK)                                           # nothing typed: nothing asked
+        self.assertEqual(sc.phase, "input")
+        g.text("a \"quoted\" $(echo hacked) `x` question")
+        g.key(keys.OK)
+        self.assertEqual(sc.phase, "answer")
+        self.assertEqual(sc.answer.strip(), "You said: a \"quoted\" $(echo hacked) `x` question")   # the text is data, never part of the shell command
+        self.assertTrue(sc.done)
+        c = Canvas()
+        g.draw(c)
+        self.assertGreater(sum(c.px), 100)
+        g.tick(T0)
+        g.tick(T0)
+        self.assertEqual(st.xp, 1)
+        g.key(keys.OK)                                           # again: back to typing, the text is kept for editing
+        self.assertEqual((sc.phase, sc.text_input), ("input", True))
+        self.assertTrue(sc.text.startswith("a "))
+        g.key(keys.BACK)
+        self.assertEqual(g.stack, [sc])                          # the only scene: nothing to pop, but no crash
+
+    def test_text_goes_only_to_scenes_that_type_and_long_answers_scroll(self):
+        sc, g, _ = self.ask(run="i=1; while [ $i -le 40 ]; do echo \"line number $i of a long answer\"; i=$((i+1)); done")
+        g.text("go")
+        g.key(keys.OK)
+        g.text("ignored while the answer shows")
+        self.assertEqual(sc.text, "go")
+        first = Canvas()
+        g.draw(first)
+        for _ in range(100):
+            g.key(keys.DOWN)
+        last = Canvas()
+        g.draw(last)
+        self.assertNotEqual(bytes(first.px), bytes(last.px))
+        for _ in range(100):
+            g.key(keys.UP)
+        self.assertEqual(sc.top, 0)
+        m = Gothi(main_menu(([], [])))
+        m.text("x")                                              # the menu does not type: ignored
+        m.draw(Canvas())
+
+    def test_leaving_stops_the_command_and_touch_mode_says_to_slide_out(self):
+        flag = os.path.join(tempfile.mkdtemp(), "f")
+        sc, g, _ = self.ask(run=f"trap 'echo stopped > {flag}; exit 0' TERM; echo thinking; while true; do sleep 0.1; done")
+        sc.spawn = lambda f: threading.Thread(target=f, daemon=True).start()
+        g.stack = [Menu("root", [("a", lambda gg: sc)]), sc]
+        g.text("q")
+        g.key(keys.OK)
+        for _ in range(50):
+            if "thinking" in sc.answer:
+                break
+            time.sleep(0.05)
+        self.assertIn("thinking", sc.answer)
+        g.key(keys.BACK)                                         # to the question
+        for _ in range(60):
+            if sc.p.proc.poll() is not None:
+                break
+            time.sleep(0.05)
+        self.assertIsNotNone(sc.p.proc.poll())
+        self.assertEqual(open(flag).read().strip(), "stopped")
+        g.mode = "touch"
+        c = Canvas()
+        g.draw(c)
+        self.assertGreater(sum(c.px), 50)
+
+    def test_missing_animation_still_draws_and_bad_names_are_rejected(self):
+        sc, g, _ = self.ask(animation="No_Such_Animation_1x1")
+        g.text("hi")
+        g.key(keys.OK)
+        g.draw(Canvas())
+        self.assertIsNone(sc.m.animation)                        # the module goes on without it
+        sc2, _, _ = self.ask(animation="../../etc")
+        self.assertIsNone(sc2.m.animation)                       # no path tricks
+
+
+@unittest.skipIf(Layout is None, "needs PySDL2")
+class KeyMapTest(unittest.TestCase):
+    def test_space_is_ok_except_while_typing(self):
+        import sdl2
+        self.assertEqual(map_key(sdl2.SDLK_SPACE), keys.OK)                 # in menus the space bar is OK
+        self.assertIsNone(map_key(sdl2.SDLK_SPACE, typing=True))            # in a text field it is a space (it comes as text input)
+        self.assertEqual(map_key(sdl2.SDLK_RETURN, typing=True), keys.OK)   # Enter still asks
+        self.assertEqual(map_key(sdl2.SDLK_ESCAPE, typing=True), keys.BACK)
+        self.assertIsNone(map_key(sdl2.SDLK_a))

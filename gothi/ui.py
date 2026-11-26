@@ -9,6 +9,10 @@ from . import flipper, keys, sysinfo
 class Scene:
     title = ""
     deed_name = None           # the deed (rules.json) the dolphin gets for opening this scene
+    text_input = False         # True while the scene wants typed characters (the frontend then starts the text input)
+
+    def on_text(self, s, gothi):
+        """Typed characters (a string; "\b" is Backspace), only while `text_input` is True."""
 
     def draw(self, c, gothi):
         pass
@@ -16,6 +20,9 @@ class Scene:
     def key(self, k, gothi):
         if k == keys.BACK:
             gothi.pop()
+
+    def on_exit(self, gothi):
+        """Called when the scene is popped (a place to stop what it started)."""
 
     def on_enter(self, gothi):
         """Called when the scene is pushed: by default it reports the deed named in `deed_name`."""
@@ -61,11 +68,15 @@ class Gothi:
 
     def pop(self):
         if len(self.stack) > 1:
-            self.stack.pop()
+            self.stack.pop().on_exit(self)
 
     def key(self, k):
         self.top.key(k, self)
         self._announce()
+
+    def text(self, s):
+        if self.top.text_input:
+            self.top.on_text(s, self)
 
     def tick(self, now):
         self.top.tick(now, self)

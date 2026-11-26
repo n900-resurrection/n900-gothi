@@ -14,7 +14,7 @@ def main():
     ap.add_argument("--mode", choices=("auto", "keyboard", "touch"), default="auto", help="layout; auto = by the keyboard slide of the N900")
     ap.add_argument("--windowed", action="store_true", help="a window even on the N900")
     ap.add_argument("--frames", type=int, help="stop after N frames (tests)")
-    ap.add_argument("--keys", default="", help="keys fed one per frame: up,down,left,right,ok,back")
+    ap.add_argument("--keys", default="", help="keys fed one per frame: up,down,left,right,ok,back; t:text types text (no commas)")
     ap.add_argument("--screenshot", metavar="FILE.bmp", help="save the window at the end")
     ap.add_argument("--rules", action="store_true", help="show where the rules of the dolphin (XP, levels, butthurt) are, and exit")
     ap.add_argument("--modules", action="store_true", help="list the folders searched for modules and the modules found, and exit")
@@ -34,7 +34,7 @@ def main():
         return
     found = discover()
     from .sdl_frontend import Frontend
-    script = [k for k in a.keys.split(",") if k in keys.ALL]
+    script = [k for k in a.keys.split(",") if k in keys.ALL or k.startswith("t:")]
     fe = Frontend(Gothi(main_menu(found), Settings(), DolphinState(load_rules(extra=[{"deeds": m.deeds} for m in found[0]]))), mode=a.mode, fullscreen=False if a.windowed else None)
     fe.run(frames=a.frames, script=script, shot=a.screenshot)
 

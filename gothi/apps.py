@@ -78,6 +78,7 @@ class Player(Scene):
     """Plays one animation of the firmware: passive frames in a loop, OK plays the active part, the speech bubbles of its meta.txt."""
 
     deed_name = "animation_view"
+    show_bubbles = True                    # the speech bubbles of the animation itself (a scene that talks with its own turns them off)
 
     def __init__(self, path):
         self.anim, self.play = flipper.Animation(path), None
@@ -99,7 +100,7 @@ class Player(Scene):
             c.box(x, y, a.w, a.h, 0)
         frame, pos = self.play.at(now)
         c.blit(frame, x, y)
-        for b in self.play.bubbles(pos):
+        for b in (self.play.bubbles(pos) if self.show_bubbles else []):
             flipper.draw_bubble(c, b, x, y)
 
 

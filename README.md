@@ -80,7 +80,7 @@ Features that need more than stock Maemo are **modules**: they are installed on 
 
 What is a module and what is not: the **core** is what needs nothing beyond stock Maemo and is always wanted (clock, battery, dolphin, settings). The rest uses the same mechanism; if it depends on another package (a file server) it is a package of its own, if it needs only the stock system it may be bundled in `gothi` but is still loaded as a module.
 
-Three kinds need **no Python**, only shell commands: `switch` (on/off of a service), `action` (runs one command, shows the lines it printed, scrolls) and `level` (a number that Left/Right change). A `switch`:
+Five kinds need **no Python**, only shell commands: `switch` (on/off of a service), `action` (runs one command, shows the lines it printed, scrolls), `level` (a number that Left/Right change), `monitor` (a command that runs while the page is open, every block of lines closed by an empty line replaces the page: the GPS) and `ask` (see below). A `switch`:
 
 ```json
 {"title": "File server", "type": "switch",
@@ -102,6 +102,8 @@ Every manifest may have `"menu": "settings"` (the entry goes to **Settings**, af
 | Brightness | 1 to 5 | the GConf key of the display (`gconftool-2`), the system applies it |
 | Bluetooth | on / off | `hciconfig hci0 up/down` through `sudo gainroot` |
 | Wi-Fi | on / off, network and address | `wifi.sh` of the package `wifi-switcher` (recommended by the package; without it the entry is not shown) |
+
+The kind `ask` types a question and shows an answer: the question is typed on the keyboard (slide it out; with the keyboard closed the page asks for that), **Enter** asks, **Esc** leaves. The command `run` gets the question in the environment variable `GOTHI_INPUT` (never pasted into the command line, so quotes and `$()` in it do nothing) and what it prints is the answer, shown as it comes in a **speech bubble over an animation of the dolphin** (`animation`: a folder of the firmware, e.g. `L1_Waves_128x50`; `hint`: an example question). Up/Down scroll a long answer, Enter or Esc asks again. See [gothi-tiny](https://github.com/n900-resurrection/gothi-tiny). A scene that wants typed characters sets `text_input = True` and gets them in `on_text()`; `python3 -m gothi --keys` can type in tests: `t:some text`.
 
 The kind `action` has `run` (exit code 0 = done), `info` (optional, shown above and asked again after each run) and `timeout` (seconds, default 90): see [gothi-timesync](https://github.com/n900-resurrection/nokia-n900-apps/tree/master/apps/gothi-timesync). A `switch` may also have `ready`: a command that must succeed after `start` before the screen says ON (the server needs time to start listening). Modules written in Python (`module.py` with `register()`) will come with the first module that needs one. Example: [gothi-copyparty](https://github.com/n900-resurrection/nokia-n900-apps/tree/master/apps/gothi-copyparty).
 

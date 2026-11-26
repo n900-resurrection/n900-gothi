@@ -30,6 +30,14 @@ def rgb565(rgb):
     return ((rgb[0] >> 3) << 11) | ((rgb[1] >> 2) << 5) | (rgb[2] >> 3)
 
 
+def map_key(sym, typing=False):
+    """The key of gothi for an SDL key symbol, None when it is not one. While a scene types, the space bar is a character (it arrives as text input),
+    not OK."""
+    if typing and sym == sdl2.SDLK_SPACE:
+        return None
+    return KEYMAP.get(sym)
+
+
 class Layout:
     """Where the screen and the touch buttons are on the 800x480 window."""
     def __init__(self, mode, h=H):
@@ -76,6 +84,7 @@ class Frontend:
         self.last_slide = 0
         self.snapshot = None
         self.down = None                                      # (key, time of the next repeat) of a held touch button
+        self.typing = False                                   # SDL text input is on
         self.running = True
 
     # ---- settings ---------------------------------------------------------
@@ -184,8 +193,12 @@ class Frontend:
                 self.want = "touch" if self.layout.mode == "keyboard" else "keyboard"
             elif sym == sdl2.SDLK_q and e.key.keysym.mod & sdl2.KMOD_CTRL:
                 self.running = False
-            elif sym in KEYMAP:
-                self.press(KEYMAP[sym])
+            elif sym == sdl2.SDLK_BACKSPACE and self.gothi.top.text_input:
+                self.gothi.text("\b")
+            elif map_key(sym, self.gothi.top.text_input):
+                self.press(map_key(sym, self.gothi.top.text_input))
+        elif t == sdl2.SDL_TEXTINPUT:
+            self.gothi.text(e.text.text.decode("utf-8", "replace"))
         elif t == sdl2.SDL_MOUSEBUTTONDOWN and e.button.button == sdl2.SDL_BUTTON_LEFT:
             k = self.layout.hit(e.button.x, e.button.y)
             if k:
@@ -208,11 +221,19 @@ class Frontend:
             while sdl2.SDL_PollEvent(ctypes.byref(ev)):
                 self.handle(ev, now)
             if script:
-                self.press(script.pop(0))
+                item = script.pop(0)
+                if item.startswith("t:"):
+                    self.gothi.text(item[2:])                       # typed text (tests): t:hello\bx
+                else:
+                    self.press(item)
             if self.down and self.down[0] in REPEAT and now >= self.down[1]:
                 self.press(self.down[0])
                 self.down = (self.down[0], now + 0.12)
             self.gothi.tick(now)
+            want = bool(self.gothi.top.text_input)               # the text input of SDL runs only while a scene types
+            if want != self.typing:
+                (sdl2.SDL_StartTextInput if want else sdl2.SDL_StopTextInput)()
+                self.typing = want
             self.render()
             n += 1
             if frames is not None and n >= frames:
