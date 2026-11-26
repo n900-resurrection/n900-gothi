@@ -4,7 +4,7 @@ import os
 
 PRESETS = [("Orange", (255, 100, 0)), ("Flipper", (255, 130, 0)), ("Amber", (255, 176, 0)), ("Green", (60, 220, 60)),
            ("Cyan", (0, 200, 220)), ("White", (235, 235, 235))]
-DEFAULTS = {"color": list(PRESETS[0][1]), "screen": "classic", "border": True, "happy": False}
+DEFAULTS = {"color": list(PRESETS[0][1]), "screen": "classic", "border": True, "happy": False, "touch_screen": False}
 SCREENS = {"classic": 64, "tall": 80}        # rows of the screen: the Flipper has 64; 80 fills the height of the N900 (128x80 at x6 = 768x480)
 
 
@@ -20,6 +20,7 @@ class Settings:
                     self.data[k] = loaded[k]
             self.data["color"] = [min(255, max(0, int(v))) for v in self.data["color"][:3]]
             self.data["happy"] = bool(self.data["happy"])
+            self.data["touch_screen"] = bool(self.data["touch_screen"])
             if self.data["screen"] not in SCREENS:
                 self.data["screen"] = "classic"
         except (OSError, ValueError, TypeError):

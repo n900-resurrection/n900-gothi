@@ -348,6 +348,29 @@ class Switch(Scene):
     def visible(self, h):
         return max(1, (h - self.info_y) // 8)
 
+    def on_tap(self, x, y, gothi):
+        """The question: the left half of the bottom line is yes, the right half no. The level line: its left and right ends change the number.
+        The big ON/OFF (and the hint beside it) is OK."""
+        if self.asking:
+            if y >= gothi.h - 12:
+                self.key(keys.OK if x < 64 else keys.BACK, gothi)
+        elif self.sub and 34 <= y < 48:
+            if x < 43 or x >= 85:
+                self.sub.change(1 if x >= 85 else -1)
+        elif 10 <= y < (34 if self.sub else self.info_y):
+            self.toggle()
+
+    _acc = 0
+
+    def on_drag(self, dy, gothi):
+        """The lines under the state follow the finger."""
+        self._acc -= dy
+        while abs(self._acc) >= 8:
+            step = 1 if self._acc > 0 else -1
+            self.top += step
+            self._acc -= step * 8
+        self.top = max(0, min(self.top, max(0, len(self.info) - self.visible(gothi.h))))
+
     def tick(self, now, gothi):
         if self.earned:
             self.earned = False
@@ -443,6 +466,10 @@ class Action(ScrollView):
         else:
             super().key(k, gothi)
 
+    def on_tap(self, x, y, gothi):
+        if y >= 10:
+            self.key(keys.OK, gothi)                             # a tap runs it
+
     def tick(self, now, gothi):
         if self.earned:
             self.earned = False
@@ -487,11 +514,22 @@ class Level(Scene):
 
     def change(self, d):
         cur = self.m.lo if self.value is None else self.value
-        v = min(self.m.hi, max(self.m.lo, cur + d * self.m.step))
+        self.set_to(cur + d * self.m.step)
+
+    def set_to(self, v):
+        v = min(self.m.hi, max(self.m.lo, v))
         self.value, self.target, self.changed_at = v, v, self.clock()
         if not self.applying:
             self.applying = True
             self.spawn(self._apply)
+
+    def on_tap(self, x, y, gothi):
+        """A tap on the bar sets the value there (rounded to a step); anywhere else the left half is Left and the right half Right."""
+        if 42 <= y < 54 and self.value is not None:
+            frac = min(1.0, max(0.0, (x - 5) / 118))
+            self.set_to(self.m.lo + round(frac * (self.m.hi - self.m.lo) / self.m.step) * self.m.step)
+        elif y >= 10:
+            self.change(1 if x >= 64 else -1)
 
     def _apply(self):
         while self.target is not None:
@@ -721,6 +759,21 @@ class Ask(Scene):
     def on_exit(self, gothi):
         if self.p:
             self.p.stop()
+
+    def on_tap(self, x, y, gothi):
+        if self.phase == "answer" and y >= 10:
+            self.key(keys.OK, gothi)                             # a tap on the answer: ask again
+
+    _acc = 0
+
+    def on_drag(self, dy, gothi):
+        if self.phase != "answer":
+            return
+        self._acc -= dy
+        while abs(self._acc) >= 7:                               # a line of the bubble is 7 pixels
+            step = 1 if self._acc > 0 else -1
+            self.top = max(0, self.top + step)
+            self._acc -= step * 7
 
     def tick(self, now, gothi):
         if self.earned:

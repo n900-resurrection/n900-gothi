@@ -10,6 +10,14 @@ class Scene:
     title = ""
     deed_name = None           # the deed (rules.json) the dolphin gets for opening this scene
     text_input = False         # True while the scene wants typed characters (the frontend then starts the text input)
+    tap_activates = False      # a list: one tap opens the item at once (a remote control) instead of selecting it first
+    title_back = True          # a tap on the title bar is Back
+
+    def on_tap(self, x, y, gothi):
+        """A finger tapped the point (x, y) of the screen (the pixels of the 128 x h canvas); the title bar is handled before (Back)."""
+
+    def on_drag(self, dy, gothi):
+        """A finger that is down moved dy pixels of the canvas (up is negative) since the last call; only after it moved more than a tap does."""
 
     def on_text(self, s, gothi):
         """Typed characters (a string; "\b" is Backspace), only while `text_input` is True."""
@@ -44,6 +52,35 @@ class Gothi:
         self.dolphin = dolphin or DolphinState(path="")      # the character: XP and butthurt (without a file unless given)
         self._levelups = []
         self._checked = 0
+        self._touch = None                 # the finger that is down: where it started, where it was, whether it drags
+
+    DRAG_PX = 3                            # canvas pixels (18 on the display at x6) that the finger has to move before it is a drag, not a tap
+
+    def touch(self, kind, x, y):
+        """A finger on the screen itself ("down", "move", "up"; x, y in canvas pixels), only when Settings > Tap the screen is on. A tap goes to the top scene
+        (a tap on the title bar is Back), a drag to its on_drag as the number of pixels moved. The frontend (or a test) tells where the finger is."""
+        if not self.settings["touch_screen"]:
+            return
+        if kind == "down":
+            self._touch = {"x": x, "y": y, "last": y, "drag": False}
+            return
+        t = self._touch
+        if t is None:
+            return
+        if kind == "move":
+            if not t["drag"] and abs(y - t["y"]) >= self.DRAG_PX:
+                t["drag"] = True                           # from here on the finger scrolls
+            if t["drag"] and y != t["last"]:
+                self.top.on_drag(y - t["last"], self)
+                t["last"] = y
+        elif kind == "up":
+            self._touch = None
+            if not t["drag"]:
+                if t["y"] < 10 and self.top.title_back:
+                    self.key(keys.BACK)
+                else:
+                    self.top.on_tap(t["x"], t["y"], self)
+                    self._announce()
 
     def deed(self, name):
         """The dolphin did something worth XP. A level-up is confirmed at once and announced by a message on top of the stack at the next key or tick."""
@@ -137,6 +174,17 @@ class ScrollView(Scene):
             gothi.pop()
         self._clamp(len(self.rows(gothi)), gothi.h)
 
+    _acc = 0
+
+    def on_drag(self, dy, gothi):
+        """The page follows the finger: dragging up shows the rows below."""
+        self._acc -= dy
+        while abs(self._acc) >= self.ROW:
+            step = 1 if self._acc > 0 else -1
+            self.top += step
+            self._acc -= step * self.ROW
+        self._clamp(len(self.rows(gothi)), gothi.h)
+
 
 class Menu(Scene):
     """A list; the selected row is inverted, a scroll bar on the right (the submenu of the Flipper)."""
@@ -195,3 +243,35 @@ class Menu(Scene):
             gothi.pop()
         self.top_row = min(max(self.top_row, self.sel - self.ROWS + 1), self.sel)
         self.selected_at = time.time()
+
+    def _row_at(self, y, h):
+        """The index of the item under the canvas row y, None when there is none."""
+        if y < 12:
+            return None
+        i = (y - 12) // self.ROW
+        n = self.top_row + i
+        return n if i < (h - 12) // self.ROW and n < len(self.items) else None
+
+    def on_tap(self, x, y, gothi):
+        n = self._row_at(y, gothi.h)
+        if n is None:
+            return
+        if n == self.sel or self.tap_activates:
+            self.sel = n
+            self.key(keys.OK, gothi)                       # a tap on the selected item is OK
+        else:
+            self.sel = n                                   # the first tap selects
+            self.selected_at = time.time()
+
+    _acc = 0
+
+    def on_drag(self, dy, gothi):
+        """The list follows the finger; the selection stays on a visible row."""
+        self.ROWS = (gothi.h - 12) // self.ROW
+        self._acc -= dy
+        while abs(self._acc) >= self.ROW:
+            step = 1 if self._acc > 0 else -1
+            self.top_row += step
+            self._acc -= step * self.ROW
+        self.top_row = max(0, min(self.top_row, max(0, len(self.items) - self.ROWS)))
+        self.sel = max(self.top_row, min(self.sel, self.top_row + self.ROWS - 1, len(self.items) - 1))

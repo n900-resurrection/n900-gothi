@@ -53,6 +53,13 @@ class Keys(Scene):
     def __init__(self):
         self.last = []
 
+    def on_tap(self, x, y, gothi):
+        self.last = (self.last + [f"tap {x},{y}"])[-6:]         # to try the touch: where the finger was
+
+    def on_drag(self, dy, gothi):
+        if not self.last or not self.last[-1].startswith("drag"):
+            self.last = (self.last + ["drag"])[-6:]
+
     def key(self, k, gothi):
         self.last = (self.last + [k])[-6:]
         if self.last[-3:] == [keys.BACK] * 3:
@@ -83,6 +90,9 @@ class Player(Scene):
     def __init__(self, path):
         self.anim, self.play = flipper.Animation(path), None
         self.title = self.anim.name
+
+    def on_tap(self, x, y, gothi):
+        self.key(keys.OK, gothi)                                 # a tap pets the dolphin
 
     def key(self, k, gothi):
         if k == keys.OK and self.play:
@@ -127,6 +137,9 @@ class Dolphin(Player):
             self.next(gothi, time.time())
         super().draw(c, gothi)
 
+    def on_tap(self, x, y, gothi):
+        self.key(keys.RIGHT if x >= 100 else keys.OK, gothi)     # the right edge is the next animation, the rest pets the dolphin
+
     def key(self, k, gothi):
         if k == keys.RIGHT:
             self.anim = None
@@ -140,6 +153,9 @@ class Dolphin(Player):
 class Message(Scene):
     def __init__(self, title, lines):
         self.title, self.lines = title, lines
+
+    def on_tap(self, x, y, gothi):
+        gothi.pop()                                              # a message is read, a tap closes it
 
     def draw(self, c, gothi):
         c.text(2, 2, self.title)
@@ -225,11 +241,26 @@ class ColorScene(Scene):
             gothi.settings.save()
             gothi.pop()
 
+    def on_tap(self, x, y, gothi):
+        """A tap on a row selects it; on a bar it sets the channel there, on the preset row the left and the right half are Left and Right."""
+        if y < 11:
+            return
+        i = (y - 11) // 13
+        if i > 3:
+            return
+        self.row = i
+        if i == 0:
+            self.key(keys.RIGHT if x >= 64 else keys.LEFT, gothi)
+        elif 28 <= x <= 102:
+            col = list(gothi.settings.color)
+            col[i - 1] = min(255, max(0, round((x - 31) * 255 / 68)))
+            gothi.settings["color"] = col
+
 
 class SettingsScene(Scene):
     """The built-in settings, then the modules that ask for the Settings (volume, brightness, Wi-Fi, Bluetooth, ...). Scrolls when it does not fit."""
     title = "Settings"
-    BUILTIN = 4
+    BUILTIN = 5
 
     def __init__(self, mods=()):
         self.sel = 0
@@ -239,7 +270,7 @@ class SettingsScene(Scene):
     def rows(self, gothi):
         st = gothi.settings
         return [("Color", ""), ("Screen", "tall 128x80" if st["screen"] == "tall" else "classic 128x64"),
-                ("Anim. border", "black" if st["border"] else "none"), ("Happy mode", "on" if st["happy"] else "off")] + [(m.title, ">") for m in self.mods]
+                ("Anim. border", "black" if st["border"] else "none"), ("Happy mode", "on" if st["happy"] else "off"), ("Tap the screen", "on" if st["touch_screen"] else "off")] + [(m.title, ">") for m in self.mods]
 
     def visible(self, h):
         return max(1, (h - 13) // 12)
@@ -288,6 +319,10 @@ class SettingsScene(Scene):
                 st["happy"] = not st["happy"]
                 st.save()
                 gothi.deed("settings_change")
+            elif self.sel == 4:
+                st["touch_screen"] = not st["touch_screen"]         # a finger on the screen itself (Gothi.touch checks it)
+                st.save()
+                gothi.deed("settings_change")
             elif self.sel >= self.BUILTIN and k in (keys.OK, keys.RIGHT):
                 gothi.push(modules.scene_for(self.mods[self.sel - self.BUILTIN]))
             elif k == keys.LEFT:
@@ -295,6 +330,29 @@ class SettingsScene(Scene):
         elif k == keys.BACK:
             gothi.pop()
         self.top = min(max(self.top, self.sel - self.visible(gothi.h) + 1), self.sel)
+
+    def on_tap(self, x, y, gothi):
+        if y < 11:
+            return
+        i = (y - 11) // 12
+        if i >= self.visible(gothi.h) or self.top + i >= len(self.rows(gothi)):
+            return
+        n = self.top + i
+        if n == self.sel:
+            self.key(keys.OK, gothi)                              # a tap on the selected row is OK
+        else:
+            self.sel = n
+
+    _acc = 0
+
+    def on_drag(self, dy, gothi):
+        self._acc -= dy
+        while abs(self._acc) >= 12:
+            step = 1 if self._acc > 0 else -1
+            self.top += step
+            self._acc -= step * 12
+        self.top = max(0, min(self.top, max(0, len(self.rows(gothi)) - self.visible(gothi.h))))
+        self.sel = max(self.top, min(self.sel, self.top + self.visible(gothi.h) - 1))
 
 
 def dolphin(gothi):
