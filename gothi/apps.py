@@ -6,7 +6,7 @@ import time
 from . import __version__, keys, sysinfo
 from . import flipper
 from .settings import PRESETS
-from .ui import Menu, Scene
+from .ui import Menu, Scene, ScrollView
 
 
 class Clock(Scene):
@@ -66,17 +66,12 @@ class Keys(Scene):
             c.text(4, 28 + i * 6, k.upper(), scale=1)
 
 
-class About(Scene):
+class About(ScrollView):
     title = "About"
     deed_name = "about_view"
 
-    def draw(self, c, gothi):
-        c.text(2, 2, "About")
-        c.hline(0, 9, c.w)
-        for i, s in enumerate((f"gothi {__version__}", "for the Nokia N900", "MIT licence", "art style: Flipper", "github.com/n900-", "resurrection/n900-gothi")):
-            c.text(4, 14 + i * 8, s)
-
-
+    def rows(self, gothi):
+        return [f"gothi {__version__}", "for the Nokia N900", "MIT licence", "art style: Flipper", "github.com/n900-", "resurrection/n900-gothi"]
 
 
 class Player(Scene):
@@ -152,26 +147,28 @@ class Message(Scene):
             c.text(4, 16 + i * 8, s)
 
 
-class Stats(Scene):
-    """The character: level, XP to the next level, mood (butthurt) and the XP earned today in each group."""
+class Stats(ScrollView):
+    """The character: level, XP to the next level, mood (butthurt) and the XP earned today in each group. Scrolls when it does not fit."""
     title = "Dolphin stats"
     deed_name = "stats_view"
 
-    def draw(self, c, gothi):
+    def rows(self, gothi):
         d = gothi.dolphin
-        c.text(2, 2, "Dolphin stats")
-        c.hline(0, 9, c.w)
-        c.text(4, 14, f"Level {d.level}" + ("" if d.level < d.max_level else " (max)"))
         got, need = d.xp_in_level()
-        c.text(4, 24, f"XP {d.xp}" + ("" if need is None else f" / {d.thresholds[d.level - 1]}"))
-        c.frame(4, 33, 120, 7)
-        c.box(5, 34, 118 if need is None else min(118, 118 * got // max(1, need)), 5)
-        happy = gothi.settings["happy"]
-        c.text(4, 44, "Mood")
-        c.text(36, 44, "always happy" if happy else f"butthurt {d.butthurt} / {d.rules['butthurt']['max']}")
-        if gothi.h > 64:
-            for i, g in enumerate(sorted({v["group"] for v in d.rules["deeds"].values()})[:4]):
-                c.text(4, 54 + i * 8, f"{g}: {d.group_xp.get(g, 0)} / {d.limit(g)} today")
+        top = d.thresholds[d.level - 1] if need is not None else None
+        rows = [f"Level {d.level}" + ("" if need is not None else " (max)"), f"XP {d.xp}" + ("" if top is None else f" / {top}"),
+                ("bar", 1.0 if need is None else got / max(1, need))]
+        if need is not None:
+            rows.append(f"Next level: {d.xp_to_levelup()} XP")
+        mx = d.rules["butthurt"]["max"]
+        if gothi.settings["happy"]:
+            rows.append("Mood: always happy")
+        else:
+            rows += [f"Butthurt {d.butthurt} / {mx}", ("bar", d.butthurt / max(1, mx))]
+        rows.append("Today:")
+        for g in sorted({v["group"] for v in d.rules["deeds"].values()}):
+            rows.append(f"  {g}: {d.group_xp.get(g, 0)} / {d.limit(g)} XP")
+        return rows
 
 
 def animations(gothi):
@@ -285,15 +282,19 @@ def dolphin(gothi):
     return Dolphin()
 
 
-def main_menu():
+def main_menu(found=None):
+    """found: (modules, errors) as `modules.discover()` returns them; None = look for them now."""
+    from . import modules
+    mods, errs = modules.discover() if found is None else found
     mm = "icons/MainMenu/"
     return Menu("gothi", [
         ("Clock", lambda g: Clock(), mm + "Plugins_14"),
         ("Battery", lambda g: Battery(), "icons/Power/Battery_16x16.png"),
-        ("Dolphin", dolphin),
+        ("Dolphin", dolphin, "icons/Gothi/Smile_14.png"),
         ("Dolphin stats", lambda g: Stats(), mm + "iButton_14"),
         ("Animations", animations, mm + "FileManager_14"),
         ("Key test", lambda g: Keys(), mm + "Debug_14"),
+        ("Modules", lambda g: modules.modules_menu(mods, errs), mm + "GPIO_14"),
         ("Settings", lambda g: SettingsScene(), mm + "Settings_14"),
         ("About", lambda g: About(), mm + "U2F_14"),
     ], status=True)

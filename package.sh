@@ -6,14 +6,14 @@ PROJ=/project
 . "$PROJ/scripts/debpack.sh"
 
 PKG=gothi
-VERSION="${VERSION:-0.3.0}"
+VERSION="${VERSION:-0.5.1}"
 OUT="$PROJ/build/out/n900-gothi-$VERSION"
 HERE="$PROJ/apps/n900-gothi"
 STAGE="$PROJ/build/deb/stage-$PKG"
 [ -d "$OUT/lib/gothi" ] || { echo "Missing build output in $OUT, run build.sh first (make build)"; exit 1; }
 
 rm -rf "$STAGE"
-mkdir -p "$STAGE/opt/gothi/share/doc/$PKG" "$STAGE/usr/bin"
+mkdir -p "$STAGE/opt/gothi/share/doc/$PKG" "$STAGE/opt/gothi/modules" "$STAGE/usr/bin"   # modules: the packages of the modules put their folders here
 cp -a "$OUT/lib" "$STAGE/opt/gothi/lib"
 cp -a "$OUT/share/flipper" "$STAGE/opt/gothi/share/flipper"
 install -m 644 "$HERE/README.md" "$HERE/LICENSE" "$STAGE/opt/gothi/share/doc/$PKG/"

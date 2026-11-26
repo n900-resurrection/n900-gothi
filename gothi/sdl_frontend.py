@@ -46,11 +46,11 @@ class Layout:
                 keys.OK: (cx - wx // 2, cy - r // 2, wx, r),
                 keys.BACK: (cx - 2 * wx, 362, 4 * wx, 90),
             }
-            self.buttons_order = [keys.UP, keys.DOWN, keys.LEFT, keys.RIGHT, keys.BACK, keys.OK]
+            self.buttons_order = [keys.OK, keys.UP, keys.DOWN, keys.LEFT, keys.RIGHT, keys.BACK]
         self.screen = (self.x, self.y, W * self.scale, h * self.scale)
 
     def hit(self, px, py):
-        for k in getattr(self, "buttons_order", []):        # OK is last: it lies on top of the cross
+        for k in getattr(self, "buttons_order", []):        # the first match wins: OK is first because it lies on top of the cross
             x, y, w, h = self.buttons[k]
             if x <= px < x + w and y <= py < y + h:
                 return k

@@ -14,6 +14,7 @@ from gothi.canvas import Canvas  # noqa: E402
 from gothi.apps import ColorScene, SettingsScene  # noqa: E402
 from gothi import dolphin as dol  # noqa: E402
 from gothi.apps import Stats  # noqa: E402
+from gothi import modules as mod  # noqa: E402
 from gothi.settings import Settings  # noqa: E402
 from gothi.ui import Gothi, Menu  # noqa: E402
 
@@ -356,3 +357,254 @@ class DolphinTest(unittest.TestCase):
                 g.stack = [Stats()]
                 g.draw(c)
                 self.assertGreater(sum(c.px), 50)
+
+
+def make_module(base, name, manifest):
+    os.makedirs(os.path.join(base, name))
+    with open(os.path.join(base, name, "module.json"), "w") as f:
+        f.write(manifest if isinstance(manifest, str) else __import__("json").dumps(manifest))
+
+
+GOOD = {"title": "Server", "type": "switch", "status": "test -f FLAG", "start": "touch FLAG", "stop": "rm FLAG", "info": "echo http://10.0.0.5:3923/; echo ' '; echo two",
+        "deed": "srv", "deeds": {"srv": {"group": "modules", "xp": 2}}}
+
+
+class ModulesTest(unittest.TestCase):
+    def setUp(self):
+        self.t = tempfile.TemporaryDirectory()
+        self.d = self.t.name
+
+    def tearDown(self):
+        self.t.cleanup()
+
+    def good(self):
+        flag = os.path.join(self.d, "flag")
+        return {k: (v.replace("FLAG", flag) if isinstance(v, str) else v) for k, v in GOOD.items()}, flag
+
+    def test_discovery_skips_broken_and_later_folder_wins(self):
+        a, b = os.path.join(self.d, "a"), os.path.join(self.d, "b")
+        make_module(a, "srv", GOOD)
+        make_module(a, "broken1", "{nonsense")
+        make_module(a, "broken2", {"type": "switch", "status": "true"})              # commands missing
+        make_module(a, "broken3", {"type": "magic"})
+        make_module(a, "broken4", dict(GOOD, deeds={"x": {"group": "g", "xp": -1}}))
+        make_module(b, "srv", dict(GOOD, title="Mine"))
+        os.makedirs(os.path.join(a, "no-manifest"))
+        mods, errs = mod.discover([a, b, os.path.join(self.d, "missing")])
+        self.assertEqual([(m.id, m.title) for m in mods], [("srv", "Mine")])
+        self.assertEqual(sorted(n for n, _ in errs), ["broken1", "broken2", "broken3", "broken4"])
+
+    def test_switch_toggles_and_shows_info(self):
+        man, flag = self.good()
+        make_module(self.d, "srv", man)
+        m = mod.discover([self.d])[0][0]
+        st = dolphin_state = dol.DolphinState(dol.load_rules(user_path=os.devnull, extra=[{"deeds": m.deeds}]), path="", now=T0)
+        g = Gothi(mod.Switch(m, spawn=lambda f: f()), Settings(os.devnull), st)
+        g.top.on_enter(g)
+        self.assertFalse(g.top.on)
+        g.draw(Canvas())
+        g.key(keys.OK)                                           # start
+        self.assertTrue(os.path.exists(flag))
+        self.assertTrue(g.top.on)
+        self.assertEqual(g.top.info, ["http://10.0.0.5:3923/", "two"])
+        c = Canvas()
+        g.draw(c)
+        self.assertGreater(sum(c.px), 50)
+        g.tick(T0)                                               # the deed of the toggle
+        self.assertEqual(dolphin_state.xp, 2)
+        g.key(keys.OK)                                           # stop
+        self.assertFalse(os.path.exists(flag))
+        self.assertFalse(g.top.on)
+
+    def test_start_waits_until_the_service_answers(self):
+        man, flag = self.good()
+        ready = os.path.join(self.d, "ready")
+        man["ready"] = f"test -f {ready}"
+        make_module(self.d, "srv", man)
+        m = mod.discover([self.d])[0][0]
+        old = mod.READY_STEP
+        mod.READY_STEP = 0.05
+        try:
+            seen = []
+            def run(cmd, timeout=10):
+                if "ready" in cmd:
+                    seen.append(cmd)
+                    if len(seen) == 3:
+                        open(ready, "w").close()
+                return mod.run_cmd(cmd, timeout)
+            sw = mod.Switch(m, run=run, spawn=lambda f: f())
+            g = Gothi(sw, Settings(os.devnull))
+            sw.on_enter(g)
+            sw.toggle()
+            self.assertEqual(len(seen), 3)                       # polled until it answered
+            self.assertTrue(sw.on)
+            self.assertIsNone(sw.action)
+        finally:
+            mod.READY_STEP = old
+
+    def test_refresh_never_blanks_the_info_or_shows_checking(self):
+        man, flag = self.good()
+        make_module(self.d, "srv", man)
+        m = mod.discover([self.d])[0][0]
+        open(flag, "w").close()
+        seen = []
+        sw = mod.Switch(m, spawn=lambda f: f())
+        sw.run = lambda cmd, timeout=10: (seen.append((sw.on, list(sw.info), sw.action)), mod.run_cmd(cmd, timeout))[1]
+        g = Gothi(sw, Settings(os.devnull))
+        sw.on_enter(g)
+        first = list(sw.info)
+        self.assertTrue(first)
+        seen.clear()
+        sw.refresh()                                             # a second check: the old values stay until the new ones are there
+        self.assertTrue(all(i == first and a is None and o for o, i, a in seen), seen)
+
+    def test_long_info_wraps_and_scrolls(self):
+        man, flag = self.good()
+        man["info"] = "for i in 1 2 3 4 5 6 7 8; do echo \"line $i of the information that is longer than the screen\"; done"
+        open(flag, "w").close()
+        make_module(self.d, "srv", man)
+        m = mod.discover([self.d])[0][0]
+        sw = mod.Switch(m, spawn=lambda f: f())
+        g = Gothi(sw, Settings(os.devnull))
+        sw.on_enter(g)
+        self.assertGreater(len(sw.info), 8)
+        self.assertTrue(all(Canvas(1, 1).text_width(x) <= 118 for x in sw.info))
+        first = Canvas()
+        g.draw(first)
+        for _ in range(len(sw.info)):
+            g.key(keys.DOWN)
+        last = Canvas()
+        g.draw(last)
+        self.assertNotEqual(bytes(first.px), bytes(last.px))                  # the page moved
+        self.assertEqual(sw.top, len(sw.info) - sw.visible(64))
+        for _ in range(len(sw.info)):
+            g.key(keys.UP)
+        self.assertEqual(sw.top, 0)
+
+    def test_command_failures_and_timeout(self):
+        self.assertEqual(mod.run_cmd("exit 3")[0], 3)
+        self.assertEqual(mod.run_cmd("sleep 5", timeout=0.2), (-1, ""))
+        self.assertEqual(mod.run_cmd("echo hi"), (0, "hi\n"))
+
+    def test_menu_lists_modules_and_errors_and_empty_message(self):
+        make_module(self.d, "srv", GOOD)
+        make_module(self.d, "bad", "{")
+        mods, errs = mod.discover([self.d])
+        g = Gothi(mod.modules_menu(mods, errs), Settings(os.devnull))
+        self.assertEqual([i[0] for i in g.top.items], ["Server", "! bad"])
+        g.draw(Canvas())
+        g.key(keys.DOWN)
+        g.key(keys.OK)                                           # the reason of the failure
+        g.draw(Canvas())
+        self.assertEqual(mod.modules_menu([], []).title, "Modules")
+
+    def test_module_deeds_are_merged_into_the_rules_and_bad_ones_skipped(self):
+        r = dol.load_rules(user_path=os.devnull, extra=[{"deeds": {"srv": {"group": "modules", "xp": 2}}}, {"levels": [5, 4]}])
+        self.assertEqual(r["deeds"]["srv"]["xp"], 2)
+        self.assertEqual(r["levels"], [300, 1800])
+
+    def test_main_menu_has_modules_item(self):
+        g = Gothi(main_menu(([], [])))
+        names = [i[0] for i in g.top.items]
+        self.assertIn("Modules", names)
+        g.top.sel = names.index("Modules")
+        g.key(keys.OK)
+        g.draw(Canvas())
+
+
+class ScrollTest(unittest.TestCase):
+    def test_stats_scrolls_and_shows_every_row(self):
+        for screen, h in (("classic", 64), ("tall", 80)):
+            g = Gothi(Stats(), Settings(os.devnull))
+            g.settings["screen"] = screen
+            g.h = g.settings.height
+            rows = g.top.rows(g)
+            n = g.top.visible(g.h)
+            self.assertGreater(len(rows), n - 1)
+            shots = set()
+            for _ in range(len(rows) + 2):                        # down past the end: it stops, no crash
+                c = Canvas(h=h)
+                g.draw(c)
+                shots.add(bytes(c.px))
+                g.key(keys.DOWN)
+            self.assertEqual(g.top.top, max(0, len(rows) - n))
+            self.assertGreater(len(shots), 1)                     # the picture changed while scrolling
+            for _ in range(len(rows) + 2):
+                g.key(keys.UP)
+            self.assertEqual(g.top.top, 0)
+
+    def test_scrollview_without_overflow_has_no_scrollbar_and_back_leaves(self):
+        g = Gothi(Menu("m", [("a", lambda g: Stats())]))
+        g.key(keys.OK)
+        g.stack[-1].rows = lambda gothi: ["one", "two"]
+        c = Canvas()
+        g.draw(c)
+        self.assertEqual(g.top.top, 0)
+        self.assertEqual(c.px[(c.h // 2) * c.w + c.w - 2], 0)     # the track of the scroll bar is not drawn
+        g.key(keys.BACK)
+        self.assertEqual(g.top.__class__.__name__, "Menu")
+
+
+try:
+    import sdl2  # noqa: F401
+    from gothi.sdl_frontend import Layout
+except ImportError:                                               # no PySDL2 on this computer: the layout is not tested
+    Layout = None
+
+
+@unittest.skipIf(Layout is None, "needs PySDL2")
+class TouchLayoutTest(unittest.TestCase):
+    def test_every_button_can_be_hit_and_ok_is_the_centre(self):
+        lay = Layout("touch")
+        for k in (keys.UP, keys.DOWN, keys.LEFT, keys.RIGHT, keys.BACK):
+            x, y, w, h = lay.buttons[k]
+            px = {keys.LEFT: x + 3, keys.RIGHT: x + w - 3}.get(k, x + w // 2)             # the outer end of each arm
+            py = {keys.UP: y + 3, keys.DOWN: y + h - 3}.get(k, y + h // 2)
+            self.assertEqual(lay.hit(px, py), k, k)
+        x, y, w, h = lay.buttons[keys.OK]
+        self.assertEqual(lay.hit(x + w // 2, y + h // 2), keys.OK)        # the centre of the cross
+        self.assertEqual(lay.hit(x + w // 2, y + h // 2 - 40), keys.UP)
+        self.assertIsNone(lay.hit(5, 5))
+
+
+class ActionTest(unittest.TestCase):
+    def mod(self, d, **over):
+        m = {"title": "Sync", "type": "action", "run": "echo before; echo a-very-long-line-that-will-not-fit-the-screen-of-the-flipper-at-all; echo after",
+             "info": "echo now", "deed": "act", "deeds": {"act": {"group": "modules", "xp": 3}}}
+        m.update(over)
+        make_module(d, "act", m)
+        return mod.discover([d])
+
+    def test_action_runs_shows_output_wrapped_and_scrolls(self):
+        with tempfile.TemporaryDirectory() as d:
+            mods, errs = self.mod(d)
+            self.assertEqual(errs, [])
+            st = dol.DolphinState(dol.load_rules(user_path=os.devnull, extra=[{"deeds": mods[0].deeds}]), path="", now=T0)
+            sc = mod.Action(mods[0], spawn=lambda f: f())
+            g = Gothi(sc, Settings(os.devnull), st)
+            sc.on_enter(g)
+            self.assertEqual(sc.rows(g)[:2], ["OK = run", "now"])
+            g.key(keys.OK)
+            rows = sc.rows(g)
+            self.assertEqual(rows[0], "done")
+            self.assertIn("before", rows)
+            self.assertGreater(len([r for r in rows if r.startswith("a-very") or r.startswith("-") or r]), 4)
+            self.assertTrue(all(Canvas(1, 1).text_width(r) <= 118 for r in rows))     # nothing is wider than the screen
+            g.tick(T0)
+            self.assertEqual(st.xp, 3)
+            g.draw(Canvas())
+            for _ in range(len(rows)):
+                g.key(keys.DOWN)
+            g.draw(Canvas())
+            self.assertGreater(sc.top, 0)
+
+    def test_failed_action_and_bad_timeout(self):
+        with tempfile.TemporaryDirectory() as d:
+            mods, _ = self.mod(d, run="echo oops; exit 4")
+            sc = mod.Action(mods[0], spawn=lambda f: f())
+            g = Gothi(sc, Settings(os.devnull))
+            g.key(keys.OK)
+            self.assertEqual(sc.rows(g)[0], "failed (4)")
+            self.assertEqual(g.dolphin.xp, 0)                                # a failure earns nothing
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(self.mod(d, timeout=0)[1][0][0], "act")        # a module with a bad timeout is reported

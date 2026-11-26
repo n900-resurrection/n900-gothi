@@ -9,6 +9,7 @@ git -C "$T/fw" sparse-checkout set assets/dolphin assets/icons
 rm -rf assets/flipper
 mkdir -p assets/flipper
 cp -r "$T/fw/assets/dolphin" "$T/fw/assets/icons" assets/flipper/
+tools/derive-icons.sh assets/flipper/icons assets/flipper/icons
 git -C "$T/fw" log -1 --format='%H %cs' > assets/flipper/COMMIT
 rm -rf "$T"
 echo "assets/flipper: $(find assets/flipper -name '*.png' | wc -l) PNG files, firmware $(cut -c1-10 assets/flipper/COMMIT)"

@@ -3,7 +3,7 @@
 #   make -C apps/n900-gothi build
 # Output: /project/build/out/n900-gothi-$VERSION/{lib/gothi, share/flipper, share/doc}
 set -euo pipefail
-VERSION="${VERSION:-0.3.0}"
+VERSION="${VERSION:-0.5.1}"
 PROJ=/project
 HERE="$PROJ/apps/n900-gothi"
 OUT="$PROJ/build/out/n900-gothi-$VERSION"
@@ -30,6 +30,7 @@ cp -r "$HERE/gothi" "$OUT/lib/gothi"
 find "$OUT/lib" -name __pycache__ -prune -exec rm -rf {} +
 cp -r "$FW/assets/dolphin/external" "$OUT/share/flipper/dolphin/external"
 for d in MainMenu Power StatusBar Common; do cp -r "$FW/assets/icons/$d" "$OUT/share/flipper/icons/$d"; done
+"$HERE/tools/derive-icons.sh" "$FW/assets/icons" "$OUT/share/flipper/icons"
 git -C "$FW" rev-parse HEAD > "$OUT/share/flipper/COMMIT"
 # the licence of the graphics: GPL-3.0 text of the firmware repository
 for f in LICENSE LICENSE.md COPYING; do

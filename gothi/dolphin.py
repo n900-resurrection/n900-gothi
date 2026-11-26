@@ -40,10 +40,16 @@ def check_rules(r):
     return r
 
 
-def load_rules(user_path=None, shipped=SHIPPED):
-    """The shipped rules with the user's file merged over them; a missing or broken user file is ignored."""
+def load_rules(user_path=None, shipped=SHIPPED, extra=()):
+    """The shipped rules, the patches of the modules (`extra`: a list of dicts, each is merged on its own and skipped when it breaks the rules) and the
+    user's file merged over them; a missing or broken user file is ignored."""
     with open(shipped) as f:
         rules = check_rules(json.load(f))
+    for patch in extra:
+        try:
+            rules = check_rules(_merge(copy.deepcopy(rules), patch))
+        except (ValueError, TypeError, KeyError, AttributeError):
+            pass
     try:
         with open(user_path or os.path.join(config_dir(), "rules.json")) as f:
             merged = _merge(copy.deepcopy(rules), json.load(f))

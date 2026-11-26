@@ -80,6 +80,53 @@ class Gothi:
         self.top.draw(c, self)
 
 
+class ScrollView(Scene):
+    """A page of rows that scrolls when it does not fit (the number of rows is worked out from the screen height). Up/Down scroll, Back leaves.
+    A subclass gives `rows(gothi)`: a list of strings, or ("bar", 0..1) for a progress bar."""
+    ROW = 10
+
+    def __init__(self):
+        self.top = 0
+
+    def rows(self, gothi):
+        return []
+
+    def visible(self, h):
+        return max(1, (h - 12) // self.ROW)
+
+    def _clamp(self, n, h):
+        self.top = max(0, min(self.top, n - self.visible(h)))
+
+    def draw(self, c, gothi):
+        c.text(2, 2, self.title)
+        c.hline(0, 9, c.w)
+        rows = self.rows(gothi)
+        n = self.visible(c.h)
+        self._clamp(len(rows), c.h)
+        for i, r in enumerate(rows[self.top:self.top + n]):
+            y = 12 + i * self.ROW
+            if isinstance(r, tuple):
+                w = c.w - 14 if len(rows) <= n else c.w - 18
+                c.frame(4, y + 1, w + 2, 7)
+                c.box(5, y + 2, int(w * min(1.0, max(0.0, r[1]))), 5)
+            else:
+                c.text(4, y + (self.ROW - 5) // 2, r)
+        if len(rows) > n:                                     # scroll bar, as in the Menu
+            bar = c.h - 12
+            c.vline(c.w - 2, 11, bar)
+            h = max(4, bar * n // len(rows))
+            c.box(c.w - 3, 11 + (bar - h) * self.top // (len(rows) - n), 3, h)
+
+    def key(self, k, gothi):
+        if k == keys.UP:
+            self.top -= 1
+        elif k == keys.DOWN:
+            self.top += 1
+        elif k in (keys.BACK, keys.LEFT):
+            gothi.pop()
+        self._clamp(len(self.rows(gothi)), gothi.h)
+
+
 class Menu(Scene):
     """A list; the selected row is inverted, a scroll bar on the right (the submenu of the Flipper)."""
     ROW = 12
