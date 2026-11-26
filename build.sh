@@ -3,7 +3,7 @@
 #   make -C apps/n900-gothi build
 # Output: /project/build/out/n900-gothi-$VERSION/{lib/gothi, share/flipper, share/doc}
 set -euo pipefail
-VERSION="${VERSION:-0.5.1}"
+VERSION="${VERSION:-0.6.0}"
 PROJ=/project
 HERE="$PROJ/apps/n900-gothi"
 OUT="$PROJ/build/out/n900-gothi-$VERSION"
@@ -27,6 +27,7 @@ echo "firmware $(git -C "$FW" rev-parse --short HEAD)"
 
 rm -rf "$OUT"; mkdir -p "$OUT/lib" "$OUT/share/flipper/icons" "$OUT/share/flipper/dolphin" "$OUT/share/doc"
 cp -r "$HERE/gothi" "$OUT/lib/gothi"
+cp -r "$HERE/modules" "$OUT/modules"            # the bundled modules (Settings: volume, brightness, Bluetooth, Wi-Fi)
 find "$OUT/lib" -name __pycache__ -prune -exec rm -rf {} +
 cp -r "$FW/assets/dolphin/external" "$OUT/share/flipper/dolphin/external"
 for d in MainMenu Power StatusBar Common; do cp -r "$FW/assets/icons/$d" "$OUT/share/flipper/icons/$d"; done

@@ -226,28 +226,45 @@ class ColorScene(Scene):
 
 
 class SettingsScene(Scene):
+    """The built-in settings, then the modules that ask for the Settings (volume, brightness, Wi-Fi, Bluetooth, ...). Scrolls when it does not fit."""
     title = "Settings"
+    BUILTIN = 4
 
-    def __init__(self):
+    def __init__(self, mods=()):
         self.sel = 0
+        self.top = 0
+        self.mods = list(mods)
 
     def rows(self, gothi):
         st = gothi.settings
         return [("Color", ""), ("Screen", "tall 128x80" if st["screen"] == "tall" else "classic 128x64"),
-                ("Anim. border", "black" if st["border"] else "none"), ("Happy mode", "on" if st["happy"] else "off")]
+                ("Anim. border", "black" if st["border"] else "none"), ("Happy mode", "on" if st["happy"] else "off")] + [(m.title, ">") for m in self.mods]
+
+    def visible(self, h):
+        return max(1, (h - 13) // 12)
 
     def draw(self, c, gothi):
         c.text(2, 2, "Settings")
         c.hline(0, 9, c.w)
-        for i, (a, b) in enumerate(self.rows(gothi)):
+        rows = self.rows(gothi)
+        n = self.visible(c.h)
+        self.top = max(0, min(self.top, len(rows) - n))
+        for i, (a, b) in enumerate(rows[self.top:self.top + n]):
             y = 13 + i * 12
-            if i == self.sel:
-                c.box(0, y - 2, c.w, 11)
-            ink = 0 if i == self.sel else 1
+            sel = self.top + i == self.sel
+            if sel:
+                c.box(0, y - 2, c.w - (5 if len(rows) > n else 0), 11)
+            ink = 0 if sel else 1
             c.text(4, y + 1, a, v=ink)
-            c.text(c.w - 4 - c.text_width(b), y + 1, b, v=ink)
+            c.text(c.w - 4 - (5 if len(rows) > n else 0) - c.text_width(b), y + 1, b, v=ink)
+        if len(rows) > n:                                     # scroll bar, as in the Menu
+            bar = c.h - 12
+            c.vline(c.w - 2, 11, bar)
+            h = max(4, bar * n // len(rows))
+            c.box(c.w - 3, 11 + (bar - h) * self.top // (len(rows) - n), 3, h)
 
     def key(self, k, gothi):
+        from . import modules
         st = gothi.settings
         n = len(self.rows(gothi))
         if k == keys.UP:
@@ -270,10 +287,13 @@ class SettingsScene(Scene):
                 st["happy"] = not st["happy"]
                 st.save()
                 gothi.deed("settings_change")
+            elif self.sel >= self.BUILTIN and k in (keys.OK, keys.RIGHT):
+                gothi.push(modules.scene_for(self.mods[self.sel - self.BUILTIN]))
             elif k == keys.LEFT:
                 gothi.pop()
         elif k == keys.BACK:
             gothi.pop()
+        self.top = min(max(self.top, self.sel - self.visible(gothi.h) + 1), self.sel)
 
 
 def dolphin(gothi):
@@ -295,6 +315,6 @@ def main_menu(found=None):
         ("Animations", animations, mm + "FileManager_14"),
         ("Key test", lambda g: Keys(), mm + "Debug_14"),
         ("Modules", lambda g: modules.modules_menu(mods, errs), mm + "GPIO_14"),
-        ("Settings", lambda g: SettingsScene(), mm + "Settings_14"),
+        ("Settings", lambda g: SettingsScene([m for m in mods if m.menu == "settings"]), mm + "Settings_14"),
         ("About", lambda g: About(), mm + "U2F_14"),
     ], status=True)

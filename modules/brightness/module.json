@@ -1,0 +1,20 @@
+{
+  "title": "Brightness",
+  "type": "level",
+  "menu": "settings",
+  "requires": [
+    "/usr/bin/gconftool-2"
+  ],
+  "get": "gconftool-2 -g /system/osso/dsm/display/display_brightness",
+  "set": "gconftool-2 -s -t int /system/osso/dsm/display/display_brightness {value}",
+  "min": 1,
+  "max": 5,
+  "step": 1,
+  "deed": "brightness_set",
+  "deeds": {
+    "brightness_set": {
+      "group": "settings",
+      "xp": 1
+    }
+  }
+}

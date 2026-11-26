@@ -6,7 +6,7 @@ PROJ=/project
 . "$PROJ/scripts/debpack.sh"
 
 PKG=gothi
-VERSION="${VERSION:-0.5.1}"
+VERSION="${VERSION:-0.6.0}"
 OUT="$PROJ/build/out/n900-gothi-$VERSION"
 HERE="$PROJ/apps/n900-gothi"
 STAGE="$PROJ/build/deb/stage-$PKG"
@@ -15,6 +15,7 @@ STAGE="$PROJ/build/deb/stage-$PKG"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/opt/gothi/share/doc/$PKG" "$STAGE/opt/gothi/modules" "$STAGE/usr/bin"   # modules: the packages of the modules put their folders here
 cp -a "$OUT/lib" "$STAGE/opt/gothi/lib"
+cp -a "$OUT/modules/." "$STAGE/opt/gothi/modules/"
 cp -a "$OUT/share/flipper" "$STAGE/opt/gothi/share/flipper"
 install -m 644 "$HERE/README.md" "$HERE/LICENSE" "$STAGE/opt/gothi/share/doc/$PKG/"
 install -m 644 "$OUT/share/doc/COPYING-flipper-graphics" "$HERE/assets/fonts/OFL.txt" "$STAGE/opt/gothi/share/doc/$PKG/"
@@ -46,6 +47,7 @@ DEBPACK_ICON="$HERE/icon.png"
 
 SECTION=user/utilities
 DEPENDS="python3.11, python3-pysdl2 (>= 0.9.17), libsdl2 (>= 2.30)"
+RECOMMENDS="wifi-switcher"      # the Wi-Fi switch of the Settings runs its script; without it that entry is simply not shown
 DISPLAY_NAME="gothi"
 SHORT_DESC="A Flipper Zero style interface: menu, clock, battery, animations (keyboard and touch)"
 LONG_DESC="gothi shows the 128x64 one-bit screen of the Flipper Zero with its original graphics and six keys: with the keyboard slid out the screen fills the display and the arrows, Enter and Backspace control it, with the keyboard closed there is a cross and a Back button for the touch screen. Applications: clock, battery, key test, a player of the firmware animations. Colour and screen size are set in Settings.

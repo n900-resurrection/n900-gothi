@@ -1,0 +1,21 @@
+{
+  "title": "Volume",
+  "type": "level",
+  "menu": "settings",
+  "requires": [
+    "/usr/bin/amixer"
+  ],
+  "get": "amixer sget Master | sed -n 's/.*\\[\\([0-9]*\\)%\\].*/\\1/p' | head -n 1",
+  "set": "amixer sset Master {value}% >/dev/null",
+  "min": 0,
+  "max": 100,
+  "step": 5,
+  "unit": "%",
+  "deed": "volume_set",
+  "deeds": {
+    "volume_set": {
+      "group": "settings",
+      "xp": 1
+    }
+  }
+}

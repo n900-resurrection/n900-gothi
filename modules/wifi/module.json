@@ -1,0 +1,19 @@
+{
+  "title": "Wi-Fi",
+  "type": "switch",
+  "menu": "settings",
+  "requires": [
+    "/usr/sbin/wifi.sh"
+  ],
+  "status": "ifconfig wlan0 >/dev/null 2>&1",
+  "start": "ifconfig wlan0 >/dev/null 2>&1 || sudo /usr/sbin/wifi.sh >/dev/null 2>&1",
+  "stop": "ifconfig wlan0 >/dev/null 2>&1 && sudo /usr/sbin/wifi.sh >/dev/null 2>&1",
+  "info": "iwconfig wlan0 2>/dev/null | sed -n 's/.*ESSID:\"\\([^\"]*\\)\".*/network: \\1/p'; ifconfig wlan0 2>/dev/null | sed -n 's/.*inet addr:\\([0-9.]*\\).*/address: \\1/p'",
+  "deed": "wifi_toggle",
+  "deeds": {
+    "wifi_toggle": {
+      "group": "settings",
+      "xp": 1
+    }
+  }
+}

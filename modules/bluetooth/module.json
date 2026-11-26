@@ -1,0 +1,18 @@
+{
+  "title": "Bluetooth",
+  "type": "switch",
+  "menu": "settings",
+  "requires": [
+    "/usr/sbin/hciconfig"
+  ],
+  "status": "hciconfig hci0 | grep -q UP",
+  "start": "echo 'hciconfig hci0 up' | sudo gainroot >/dev/null 2>&1",
+  "stop": "echo 'hciconfig hci0 down' | sudo gainroot >/dev/null 2>&1",
+  "deed": "bluetooth_toggle",
+  "deeds": {
+    "bluetooth_toggle": {
+      "group": "settings",
+      "xp": 1
+    }
+  }
+}

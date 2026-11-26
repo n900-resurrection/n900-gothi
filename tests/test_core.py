@@ -360,7 +360,7 @@ class DolphinTest(unittest.TestCase):
 
 
 def make_module(base, name, manifest):
-    os.makedirs(os.path.join(base, name))
+    os.makedirs(os.path.join(base, name), exist_ok=True)
     with open(os.path.join(base, name, "module.json"), "w") as f:
         f.write(manifest if isinstance(manifest, str) else __import__("json").dumps(manifest))
 
@@ -608,3 +608,124 @@ class ActionTest(unittest.TestCase):
             self.assertEqual(g.dolphin.xp, 0)                                # a failure earns nothing
         with tempfile.TemporaryDirectory() as d:
             self.assertEqual(self.mod(d, timeout=0)[1][0][0], "act")        # a module with a bad timeout is reported
+
+
+class LevelTest(unittest.TestCase):
+    def setUp(self):
+        self.t = tempfile.TemporaryDirectory()
+        self.d = self.t.name
+        self.f = os.path.join(self.d, "val")
+        open(self.f, "w").write("40\n")
+
+    def tearDown(self):
+        self.t.cleanup()
+
+    def mod(self, **over):
+        m = {"title": "Vol", "type": "level", "menu": "settings", "get": f"cat {self.f}", "set": f"echo {{value}} > {self.f}", "min": 0, "max": 100, "step": 5, "unit": "%",
+             "deed": "vol", "deeds": {"vol": {"group": "settings", "xp": 1}}}
+        m.update(over)
+        make_module(self.d, "vol", m)
+        return mod.discover([self.d])
+
+    def test_level_reads_changes_clamps_and_writes(self):
+        mods, errs = self.mod()
+        self.assertEqual(errs, [])
+        t = [0.0]
+        sc = mod.Level(mods[0], spawn=lambda f: f(), clock=lambda: t[0])
+        g = Gothi(sc, Settings(os.devnull))
+        sc.on_enter(g)
+        self.assertEqual(sc.value, 40)
+        g.key(keys.RIGHT)
+        self.assertEqual((sc.value, open(self.f).read().strip()), (45, "45"))
+        g.key(keys.LEFT)
+        g.key(keys.DOWN)
+        self.assertEqual(open(self.f).read().strip(), "35")
+        for _ in range(30):
+            g.key(keys.RIGHT)
+        self.assertEqual((sc.value, open(self.f).read().strip()), (100, "100"))     # clamped at max
+        c = Canvas()
+        g.draw(c)
+        self.assertGreater(sum(c.px), 40)
+        g.tick(100.0)
+        self.assertEqual(g.dolphin.xp, 0)                                           # no such deed in this state's rules
+        g.key(keys.BACK)
+
+    def test_one_deed_per_visit_and_readback_does_not_fight_the_user(self):
+        mods, _ = self.mod()
+        st = dol.DolphinState(dol.load_rules(user_path=os.devnull, extra=[{"deeds": mods[0].deeds}]), path="", now=T0)
+        t = [0.0]
+        sc = mod.Level(mods[0], spawn=lambda f: f(), clock=lambda: t[0])
+        g = Gothi(sc, Settings(os.devnull), st)
+        sc.on_enter(g)
+        g.key(keys.RIGHT)
+        g.key(keys.RIGHT)
+        g.tick(10.0)
+        g.key(keys.RIGHT)
+        g.tick(20.0)
+        self.assertEqual(st.xp, 1)
+        open(self.f, "w").write("5\n")                                              # something else changed it a moment ago ...
+        t[0] = 1.0
+        sc._read()
+        self.assertEqual(sc.value, 55)                                              # ... the user's choice is kept for HOLD seconds
+        t[0] = 10.0
+        sc._read()
+        self.assertEqual(sc.value, 5)
+
+    def test_last_value_wins_while_a_set_runs(self):
+        mods, _ = self.mod()
+        pending = []
+        sc = mod.Level(mods[0], spawn=pending.append)
+        g = Gothi(sc, Settings(os.devnull))
+        sc.value = 40
+        for _ in range(3):
+            g.key(keys.RIGHT)                                                        # the setter has not run yet
+        self.assertEqual(len(pending), 1)                                            # only one is started
+        pending.pop()()
+        self.assertEqual(open(self.f).read().strip(), "55")
+
+    def test_bad_level_and_requires_and_menu(self):
+        self.assertEqual(self.mod(min=10, max=5)[1][0][0], "vol")
+        self.assertEqual(self.mod(step=0)[1][0][0], "vol")
+        self.assertEqual(self.mod(menu="nowhere")[1][0][0], "vol")
+        with tempfile.TemporaryDirectory() as d2:
+            make_module(d2, "x", {"title": "X", "type": "level", "get": "true", "set": "true", "requires": ["/definitely/not/here"]})
+            self.assertEqual(mod.discover([d2]), ([], []))                           # a missing tool: no module, no error
+            make_module(d2, "y", {"title": "Y", "type": "level", "get": "true", "set": "true", "requires": ["/bin/sh"]})
+            self.assertEqual([m.id for m in mod.discover([d2])[0]], ["y"])
+
+    def test_settings_lists_modules_scrolls_and_opens_them(self):
+        mods, _ = self.mod()
+        others = []
+        for i in range(6):
+            make_module(self.d, f"s{i}", {"title": f"Switch {i}", "type": "switch", "menu": "settings", "status": "false", "start": "true", "stop": "true"})
+        mods, _ = mod.discover([self.d])
+        sm = [m for m in mods if m.menu == "settings"]
+        g = Gothi(SettingsScene(sm), Settings(os.devnull))
+        n = len(g.top.rows(g))
+        self.assertEqual(n, 4 + len(sm))
+        seen = set()
+        for _ in range(n):
+            c = Canvas()
+            g.draw(c)
+            seen.add(bytes(c.px))
+            g.key(keys.DOWN)
+        self.assertGreater(len(seen), 3)                                             # the list scrolled
+        g.stack[0].sel = 4
+        g.key(keys.OK)
+        self.assertIn(g.top.__class__.__name__, ("Level", "Switch"))
+        g.draw(Canvas())
+        g.key(keys.BACK)
+        self.assertEqual(g.top.__class__.__name__, "SettingsScene")
+
+    def test_bundled_modules_are_valid(self):
+        here = os.path.join(os.path.dirname(__file__), "..", "modules")
+        for n in os.listdir(here):                                                    # requires is not checked here: the tools are not on this computer
+            with open(os.path.join(here, n, "module.json")) as f:
+                data = __import__("json").load(f)
+            data["requires"] = []
+            tmp = os.path.join(self.d, "b")
+            make_module(tmp, n, data)
+        mods, errs = mod.discover([tmp])
+        self.assertEqual(errs, [])
+        self.assertEqual({m.id for m in mods}, {"volume", "brightness", "bluetooth", "wifi"})
+        self.assertTrue(all(m.menu == "settings" for m in mods))

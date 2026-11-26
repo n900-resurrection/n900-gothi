@@ -4,7 +4,8 @@ A module is a folder with a manifest `module.json` in one of the search folders 
 GOTHI_MODULES = folders separated by colons replaces both, for development). The folder name is the id of the module; the same id in a later folder
 replaces the earlier one (so the user can change a packaged module). Nothing is loaded from anywhere else.
 
-Two kinds need no Python: shell commands decide everything. `switch` is an on/off of a service, `action` runs one command and shows what it printed.
+Three kinds need no Python: shell commands decide everything. `switch` is an on/off of a service, `action` runs one command and shows what it printed,
+`level` is a number that Left/Right change (volume, brightness).
 
     {"title": "File server",             menu label
      "type": "switch",
@@ -22,9 +23,18 @@ Two kinds need no Python: shell commands decide everything. `switch` is an on/of
      "timeout": 90,                      optional: seconds the command may take
      "deed": "time_sync", "deeds": {...}}
 
+    {"title": "Volume", "type": "level",
+     "get": "...",                       prints the current value (the first number is taken)
+     "set": "amixer sset Master {value}%",       {value} is replaced by the number; the last value wins while the command runs
+     "min": 0, "max": 100, "step": 5, "unit": "%"}
+
+Every manifest may also have  "menu": "settings"  (the entry goes to the Settings, default "modules": the menu Modules)  and
+"requires": ["/usr/bin/amixer"]  (paths that must exist, otherwise the module is not offered at all: the system lacks the tool).
+
 A broken module is skipped and shown as a line in the menu, the rest keeps working. Python modules (module.py with register()) will come with the first module that needs one."""
 import json
 import os
+import re
 import subprocess
 import threading
 import time
@@ -32,7 +42,7 @@ import time
 from . import keys
 from .ui import Menu, Scene, ScrollView
 
-KINDS = {"switch": ("status", "start", "stop"), "action": ("run",)}      # kind -> the commands it needs
+KINDS = {"switch": ("status", "start", "stop"), "action": ("run",), "level": ("get", "set")}      # kind -> the commands it needs
 POLL = 5                                            # seconds between two status checks while the scene is open
 SHOWN_INFO = 30                                     # lines of `info` that are kept (the page scrolls)
 READY_TIMEOUT = 90                                  # seconds to wait for `ready` after a start
@@ -43,7 +53,12 @@ def search_dirs():
     env = os.environ.get("GOTHI_MODULES")
     if env is not None:
         return [d for d in env.split(":") if d]
-    return ["/opt/gothi/modules", os.path.join(os.path.expanduser("~"), ".config", "gothi", "modules")]
+    src = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "modules")      # the bundled modules when run from the source tree
+    return [src, "/opt/gothi/modules", os.path.join(os.path.expanduser("~"), ".config", "gothi", "modules")]
+
+
+class Missing(Exception):
+    """A required tool is not on this system: the module is left out without an error."""
 
 
 class Module:
@@ -53,6 +68,20 @@ class Module:
         self.kind = data.get("type")
         if self.kind not in KINDS:
             raise ValueError(f"unknown type {self.kind!r}")
+        self.menu = data.get("menu", "modules")
+        if self.menu not in ("modules", "settings"):
+            raise ValueError("bad menu")
+        req = data.get("requires", [])
+        if not isinstance(req, list) or not all(isinstance(r, str) for r in req):
+            raise ValueError("bad requires")
+        if any(not os.path.exists(r) for r in req):
+            raise Missing()
+        self.lo, self.hi, self.step, self.unit = 0, 100, 5, ""
+        if self.kind == "level":
+            self.lo, self.hi, self.step = (data.get(k, d) for k, d in (("min", 0), ("max", 100), ("step", 5)))
+            self.unit = str(data.get("unit", ""))[:3]
+            if not all(isinstance(v, int) and not isinstance(v, bool) for v in (self.lo, self.hi, self.step)) or not self.lo < self.hi or self.step < 1:
+                raise ValueError("bad min, max or step")
         self.cmds = {}
         for c in KINDS[self.kind] + ("info", "ready"):
             v = data.get(c)
@@ -92,6 +121,8 @@ def discover(dirs=None):
                 with open(os.path.join(p, "module.json")) as f:
                     found[n] = Module(p, json.load(f))
                 errors = [e for e in errors if e[0] != n]
+            except Missing:
+                found.pop(n, None)
             except (OSError, ValueError, TypeError, AttributeError) as e:
                 found.pop(n, None)
                 errors.append((n, str(e)[:40]))
@@ -281,11 +312,94 @@ class Action(ScrollView):
         return [state] + self.info + ([""] if self.out else []) + self.out
 
 
+class Level(Scene):
+    """A number between min and max: Left/Right (or Down/Up) change it by `step`; the command `set` runs in the background, the last value wins."""
+    HOLD = 3.0                          # seconds after a change during which the value read back does not overwrite what the user chose
+
+    def __init__(self, module, run=run_cmd, spawn=_thread, clock=time.time):
+        self.m, self.run, self.spawn, self.clock = module, run, spawn, clock
+        self.title = module.title
+        self.value = None
+        self.target = None              # a value that waits to be set
+        self.applying = False
+        self.reading = False
+        self.changed_at = -1e9
+        self.checked = 0.0
+        self.earned = False
+        self.rewarded = False
+
+    def on_enter(self, gothi):
+        self.refresh()
+
+    def refresh(self):
+        if not self.reading:
+            self.reading = True
+            self.spawn(self._read)
+
+    def _read(self):
+        _, out = self.run(self.m.cmds["get"])
+        mt = re.search(r"-?\d+", out)
+        if mt and self.target is None and not self.applying and self.clock() - self.changed_at > self.HOLD:
+            self.value = min(self.m.hi, max(self.m.lo, int(mt.group())))
+        self.reading = False
+
+    def change(self, d):
+        cur = self.m.lo if self.value is None else self.value
+        v = min(self.m.hi, max(self.m.lo, cur + d * self.m.step))
+        self.value, self.target, self.changed_at = v, v, self.clock()
+        if not self.applying:
+            self.applying = True
+            self.spawn(self._apply)
+
+    def _apply(self):
+        while self.target is not None:
+            v, self.target = self.target, None
+            self.run(self.m.cmds["set"].replace("{value}", str(int(v))))
+            self.earned = True
+        self.applying = False
+
+    def key(self, k, gothi):
+        if k in (keys.RIGHT, keys.UP):
+            self.change(1)
+        elif k in (keys.LEFT, keys.DOWN):
+            self.change(-1)
+        elif k == keys.BACK:
+            gothi.pop()
+
+    def tick(self, now, gothi):
+        if self.earned:
+            self.earned = False
+            if self.m.deed and not self.rewarded:
+                self.rewarded = True                    # one deed per visit, not one per step
+                gothi.deed(self.m.deed)
+        if now - self.checked > POLL:
+            self.checked = now
+            self.refresh()
+
+    def draw(self, c, gothi):
+        c.text(2, 2, self.title)
+        c.hline(0, 9, c.w)
+        txt = "..." if self.value is None else f"{self.value}{self.m.unit}"
+        c.text(4, 14, txt, scale=3)
+        if self.value is not None:
+            w = c.w - 10
+            c.frame(4, 44, w + 2, 8)
+            c.box(5, 45, w * (self.value - self.m.lo) // (self.m.hi - self.m.lo), 6)
+        hint = "< > change"
+        c.text(c.w - 4 - c.text_width(hint), 20, hint)
+
+
+SCENES = {"switch": Switch, "action": Action, "level": Level}
+
+
+def scene_for(module):
+    return SCENES[module.kind](module)
+
+
 def modules_menu(modules, errors):
     """The submenu Modules: one row per module, then the modules that failed to load (OK shows why)."""
     from .apps import Message
-    scenes = {"switch": Switch, "action": Action}
-    items = [(m.title, (lambda g, m=m: scenes[m.kind](m)), m.icon) for m in modules]
+    items = [(m.title, (lambda g, m=m: scene_for(m)), m.icon) for m in modules if m.menu == "modules"]
     items += [("! " + n, (lambda g, e=e, n=n: Message(n[:20], [e[i:i + 24] for i in range(0, len(e), 24)] or ["?"]))) for n, e in errors]
     if not items:
         return Message("Modules", ["none installed", "(see README of gothi)"])

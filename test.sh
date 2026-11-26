@@ -19,4 +19,28 @@ contains settings-saved "color" sh -c 'SDL_VIDEODRIVER=dummy /usr/bin/gothi --fr
 contains dolphin-state-saved "\"tools\": 1" sh -c 'rm -f '$TESTDIR'/.config/gothi/dolphin-state.json; SDL_VIDEODRIVER=dummy /usr/bin/gothi --frames 6 --keys ok,back >/dev/null 2>&1; cat '$TESTDIR'/.config/gothi/dolphin-state.json'
 contains rules-shipped "rules.json" sh -c '/usr/bin/gothi --rules'
 contains modules-listing "search folders" sh -c '/usr/bin/gothi --modules'
+# the bundled modules (Settings): the commands of the manifests, as the user. State is restored at the end of each test.
+M() { PYTHONPATH=/opt/gothi/lib python3 -W ignore -c "import json, sys; print(json.load(open('/opt/gothi/modules/$1/module.json'))[sys.argv[1]])" "$2"; }
+U() { su user -c "$(M "$1" "$2" | sed "s/{value}/$3/")"; }
+contains bundled-modules "Wi-Fi (switch)" sh -c '/usr/bin/gothi --modules'
+contains bundled-volume "Volume (level)" sh -c '/usr/bin/gothi --modules'
+contains bundled-brightness "Brightness (level)" sh -c '/usr/bin/gothi --modules'
+contains bundled-bluetooth "Bluetooth (switch)" sh -c '/usr/bin/gothi --modules'
+volume_roundtrip() {
+    orig=$(U volume get); U volume set 55; got=$(U volume get); U volume set "$orig"
+    [ "$got" = 55 ] && echo "volume-roundtrip-ok"
+}
+contains volume-roundtrip "volume-roundtrip-ok" volume_roundtrip
+brightness_read() { v=$(U brightness get); [ "$v" -ge 1 ] && [ "$v" -le 5 ] && echo "brightness-$v-ok"; U brightness set "$v"; }
+contains brightness-read "ok" brightness_read
+bluetooth_cycle() {
+    if U bluetooth status; then was=1; else was=0; fi
+    U bluetooth start; sleep 2; U bluetooth status && up=1 || up=0
+    U bluetooth stop; sleep 2; U bluetooth status && down=0 || down=1
+    [ "$was" = 1 ] && U bluetooth start
+    [ "$up$down" = 11 ] && echo "bluetooth-cycle-ok"
+}
+contains bluetooth-cycle "bluetooth-cycle-ok" bluetooth_cycle
+# Wi-Fi: only the state is read (switching it off would cut the connection that runs this test)
+contains wifi-status "on" sh -c 'su user -c "$(PYTHONPATH=/opt/gothi/lib python3 -W ignore -c "import json; print(json.load(open(\"/opt/gothi/modules/wifi/module.json\"))[\"status\"])")" && echo on || echo off'
 summary

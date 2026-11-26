@@ -8,6 +8,18 @@ Successor of [RPi_Zero_Gothi](https://github.com/elPytel/RPi_Zero_Gothi) (Raspbe
 
 > **MVP.** Works on the N900 and on the PC: the menu with the firmware icons, a clock, battery data, a key test, a **Dolphin** (the animations of the firmware as on the Flipper desktop: picked by weight, level and mood, passive and active frames, speech bubbles; **OK** = the dolphin acts, **Right** = the next one), a player of single animations, a **character** (XP, three levels, butthurt) with its own stats screen, settings (colour, screen size, happy mode), a `.deb` package. Everything else is still to do.
 
+## Screenshots
+
+| menu | touch layout | Dolphin | Dolphin stats (tall screen) |
+|---|---|---|---|
+| ![Menu](screenshots/menu.png) | ![Touch](screenshots/menu-touch.png) | ![Dolphin](screenshots/dolphin-bubble.png) | ![Stats](screenshots/stats-tall.png) |
+
+| Settings | Volume | Wi-Fi |
+|---|---|---|
+| ![Settings](screenshots/settings.png) | ![Volume](screenshots/volume.png) | ![Wi-Fi](screenshots/wifi.png) |
+
+*(Rendered on a computer with the same code; the modules in the last row use made-up values.)*
+
 ## Two ways to control it
 
 | Keyboard slid out | Keyboard closed |
@@ -68,7 +80,7 @@ Features that need more than stock Maemo are **modules**: they are installed on 
 
 What is a module and what is not: the **core** is what needs nothing beyond stock Maemo and is always wanted (clock, battery, dolphin, settings). The rest uses the same mechanism; if it depends on another package (a file server) it is a package of its own, if it needs only the stock system it may be bundled in `gothi` but is still loaded as a module.
 
-Two kinds need **no Python**, only shell commands: `switch` (on/off of a service) and `action` (runs one command, shows the lines it printed, scrolls). A `switch`:
+Three kinds need **no Python**, only shell commands: `switch` (on/off of a service), `action` (runs one command, shows the lines it printed, scrolls) and `level` (a number that Left/Right change). A `switch`:
 
 ```json
 {"title": "File server", "type": "switch",
@@ -78,7 +90,20 @@ Two kinds need **no Python**, only shell commands: `switch` (on/off of a service
  "deed": "fileserver_toggle", "deeds": {"fileserver_toggle": {"group": "modules", "xp": 2}}}
 ```
 
-`status` exits 0 when the service is on, `info` (optional) prints lines that are shown while it is on, `icon` (optional) is a 1-bit PNG in the folder, `deed` and `deeds` give the dolphin XP for a toggle (merged into the [rules](#the-dolphin-xp-levels-and-butthurt), you can still override them). The commands run in the background with a time limit and the screen asks again every 5 seconds while it is open. The kind `action` has `run` (exit code 0 = done), `info` (optional, shown above and asked again after each run) and `timeout` (seconds, default 90): see [gothi-timesync](https://github.com/n900-resurrection/nokia-n900-apps/tree/master/apps/gothi-timesync). A `switch` may also have `ready`: a command that must succeed after `start` before the screen says ON (the server needs time to start listening). Modules written in Python (`module.py` with `register()`) will come with the first module that needs one. Example: [gothi-copyparty](https://github.com/n900-resurrection/nokia-n900-apps/tree/master/apps/gothi-copyparty).
+`status` exits 0 when the service is on, `info` (optional) prints lines that are shown while it is on, `icon` (optional) is a 1-bit PNG in the folder, `deed` and `deeds` give the dolphin XP for a toggle (merged into the [rules](#the-dolphin-xp-levels-and-butthurt), you can still override them). The commands run in the background with a time limit and the screen asks again every 5 seconds while it is open. The kind `level` has `get` (prints the value, the first number is taken), `set` (`{value}` is replaced by the number; while a `set` runs the last value wins) and `min`, `max`, `step`, `unit`; the value read back does not overwrite a choice made in the last 3 seconds.
+
+Every manifest may have `"menu": "settings"` (the entry goes to **Settings**, after the built-in rows, instead of the menu Modules) and `"requires": ["/usr/bin/amixer"]` (paths that must exist; when one is missing the module is simply not offered, no error).
+
+**Bundled modules** (folder `modules/` of this repository, installed to `/opt/gothi/modules/`; they use only the stock system, so they are part of the package, but still go through the same mechanism and can be replaced by a folder of the same name in `~/.config/gothi/modules/`):
+
+| module | what | how |
+|---|---|---|
+| Volume | 0 to 100 % | `amixer sset Master` (the master of PulseAudio) |
+| Brightness | 1 to 5 | the GConf key of the display (`gconftool-2`), the system applies it |
+| Bluetooth | on / off | `hciconfig hci0 up/down` through `sudo gainroot` |
+| Wi-Fi | on / off, network and address | `wifi.sh` of the package `wifi-switcher` (recommended by the package; without it the entry is not shown) |
+
+The kind `action` has `run` (exit code 0 = done), `info` (optional, shown above and asked again after each run) and `timeout` (seconds, default 90): see [gothi-timesync](https://github.com/n900-resurrection/nokia-n900-apps/tree/master/apps/gothi-timesync). A `switch` may also have `ready`: a command that must succeed after `start` before the screen says ON (the server needs time to start listening). Modules written in Python (`module.py` with `register()`) will come with the first module that needs one. Example: [gothi-copyparty](https://github.com/n900-resurrection/nokia-n900-apps/tree/master/apps/gothi-copyparty).
 
 ## Next
 
