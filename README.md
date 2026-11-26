@@ -112,6 +112,24 @@ Every manifest may have `"menu": "settings"` (the entry goes to **Settings**, af
 | Brightness | 1 to 5 | the GConf key of the display (`gconftool-2`), the system applies it |
 | Bluetooth | on / off | `hciconfig hci0 up/down` through `sudo gainroot` |
 | Wi-Fi | on / off, network and address | `wifi.sh` of the package `wifi-switcher` (recommended by the package; without it the entry is not shown) |
+| Wi-Fi scan | the networks around, channels, summary, saved networks (menu Modules) | `iwlist wlan0 scan`, see [below](#wi-fi-scan) |
+
+### Wi-Fi scan
+
+The bundled module **Wi-Fi scan** (menu Modules) shows what the phone's Wi-Fi hears. It is passive: it lists what the access points announce, nothing is sent to them and nothing connects.
+
+| ![Networks](screenshots/wifi-scan-networks.png) | ![Network](screenshots/wifi-scan-detail.png) | ![Channels](screenshots/wifi-scan-channels.png) |
+|---|---|---|
+| ![Summary](screenshots/wifi-scan-summary.png) | ![Saved](screenshots/wifi-scan-saved.png) | |
+
+(Made on a computer with a made-up list of networks.)
+
+- **Networks**: the strongest first, name, security (`OPEN`, `WEP`, `WPA`, `WPA2`, `WPA12` = both, `EAP`) and the level in dBm. OK opens one: address (BSSID), channel, level with a bar, quality. A hidden network is shown as `(hidden)`.
+- **Channels**: how many networks sit on each 2.4 GHz channel and the quietest channel (the neighbours of a channel count too, weighted by their level). The N900 has no 5 GHz.
+- **Summary**: counts by security, hidden and open networks, the strongest one, and how many different networks were seen since the module was opened.
+- **Saved networks**: the Wi-Fi networks stored in the phone (the connection manager's list), `*` marks those in range. It only lists them; connecting is not done yet.
+
+A scan takes about a second and repeats every 5 seconds while one of the screens is on top. A normal user can only read the *results of the last scan* on the N900 (often one network), a fresh scan needs root, so the package installs one narrow `sudo` rule, `user ALL = NOPASSWD: /sbin/iwlist wlan0 scan` (in `/etc/sudoers.d/gothi.sudoers`, removed with the package). Without it the module falls back to the stale results. The data code is `gothi/wifi.py` (parsing, channel and summary maths, saved networks) and is meant to be reused by other modules.
 
 A `switch` may also have (all optional): `level` (a number on the same screen, Left/Right change it; `get`, `set`, `min`, `max`, `step`, `unit` and `divisor` + `decimals` to show 90500 as 90.5), `confirm` (a question asked before every start: OK = yes, Back = no), `auto_off` (seconds; after a start a **detached timer** runs `stop`, also when gothi is closed; a manual stop cancels it; the screen shows the time left) and `labels` (the words for on and off, e.g. `ON AIR`). See [gothi-fmtx](https://github.com/n900-resurrection/gothi-fmtx) for all of them together.
 
@@ -123,7 +141,7 @@ The kind `action` has `run` (exit code 0 = done), `info` (optional, shown above 
 
 ## Next
 
-Wi-Fi scan, GPS, FM, USB OTG modules; see the [issues](https://github.com/n900-resurrection/n900-gothi/issues).
+GPS, FM, USB OTG modules, wardriving; see the [issues](https://github.com/n900-resurrection/n900-gothi/issues).
 
 ## Licence
 

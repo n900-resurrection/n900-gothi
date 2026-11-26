@@ -6,7 +6,7 @@ PROJ=/project
 . "$PROJ/scripts/debpack.sh"
 
 PKG=gothi
-VERSION="${VERSION:-0.11.0}"
+VERSION="${VERSION:-0.12.0}"
 OUT="$PROJ/build/out/n900-gothi-$VERSION"
 HERE="$PROJ/apps/n900-gothi"
 STAGE="$PROJ/build/deb/stage-$PKG"
@@ -44,6 +44,26 @@ Exec=/usr/bin/gothi
 X-Osso-Type=application/x-executable
 EOT
 DEBPACK_ICON="$HERE/icon.png"
+
+# Wi-Fi scan (modules/wifi-scan): a normal user only reads the results of the last scan (often one network), a fresh scan needs root. One narrow sudo rule,
+# the way Maemo packages do it (a file in /etc/sudoers.d, then update-sudoers); the rule is made on the phone, so it is not a conffile.
+mkdir -p "$STAGE/DEBIAN"
+cat > "$STAGE/DEBIAN/postinst" <<'EOT'
+#!/bin/sh
+echo "user ALL = NOPASSWD: /sbin/iwlist wlan0 scan" > /etc/sudoers.d/gothi.sudoers
+chmod 644 /etc/sudoers.d/gothi.sudoers
+update-sudoers >/dev/null 2>&1 || true
+exit 0
+EOT
+cat > "$STAGE/DEBIAN/postrm" <<'EOT'
+#!/bin/sh
+if [ "$1" = remove ] || [ "$1" = purge ]; then
+    rm -f /etc/sudoers.d/gothi.sudoers
+    update-sudoers >/dev/null 2>&1 || true
+fi
+exit 0
+EOT
+chmod 755 "$STAGE/DEBIAN/postinst" "$STAGE/DEBIAN/postrm"
 
 SECTION=user/utilities
 DEPENDS="python3.11, python3-pysdl2 (>= 0.9.17), libsdl2 (>= 2.30)"

@@ -725,17 +725,22 @@ class LevelTest(unittest.TestCase):
         self.assertEqual(g.top.__class__.__name__, "SettingsScene")
 
     def test_bundled_modules_are_valid(self):
+        import json
+        import shutil
         here = os.path.join(os.path.dirname(__file__), "..", "modules")
+        tmp = os.path.join(self.d, "b")
         for n in os.listdir(here):                                                    # requires is not checked here: the tools are not on this computer
-            with open(os.path.join(here, n, "module.json")) as f:
-                data = __import__("json").load(f)
+            shutil.copytree(os.path.join(here, n), os.path.join(tmp, n), ignore=shutil.ignore_patterns("__pycache__"))
+            with open(os.path.join(tmp, n, "module.json")) as f:
+                data = json.load(f)
             data["requires"] = []
-            tmp = os.path.join(self.d, "b")
-            make_module(tmp, n, data)
+            with open(os.path.join(tmp, n, "module.json"), "w") as f:
+                json.dump(data, f)
         mods, errs = mod.discover([tmp])
         self.assertEqual(errs, [])
-        self.assertEqual({m.id for m in mods}, {"volume", "brightness", "bluetooth", "wifi"})
-        self.assertTrue(all(m.menu == "settings" for m in mods))
+        self.assertEqual({m.id for m in mods}, {"volume", "brightness", "bluetooth", "wifi", "wifi-scan"})
+        self.assertTrue(all(m.menu == "settings" for m in mods if m.id != "wifi-scan"))
+        self.assertEqual({m.id: m.menu for m in mods}["wifi-scan"], "modules")
 
 
 class MonitorTest(unittest.TestCase):

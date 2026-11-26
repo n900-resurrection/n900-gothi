@@ -1,0 +1,8 @@
+{
+  "title": "Wi-Fi scan",
+  "type": "python",
+  "entry": "module.py",
+  "requires": ["/sbin/iwlist"],
+  "deed": "wifi_scan",
+  "deeds": {"wifi_scan": {"group": "modules", "xp": 1}}
+}
