@@ -894,3 +894,92 @@ class KeyMapTest(unittest.TestCase):
         self.assertEqual(map_key(sdl2.SDLK_RETURN, typing=True), keys.OK)   # Enter still asks
         self.assertEqual(map_key(sdl2.SDLK_ESCAPE, typing=True), keys.BACK)
         self.assertIsNone(map_key(sdl2.SDLK_a))
+
+
+class SwitchExtrasTest(unittest.TestCase):
+    def setUp(self):
+        self.t = tempfile.TemporaryDirectory()
+        self.d = self.t.name
+        self.flag = os.path.join(self.d, "on")
+        self.val = os.path.join(self.d, "val")
+        open(self.val, "w").write("90500\n")
+        self.home = os.environ.get("HOME")
+        os.environ["HOME"] = self.d                              # the timer files go to ~/.cache/gothi
+
+    def tearDown(self):
+        os.environ["HOME"] = self.home
+        self.t.cleanup()
+
+    def sw(self, **over):
+        man = {"title": "Radio", "type": "switch", "status": f"test -f {self.flag}", "start": f"touch {self.flag}", "stop": f"rm -f {self.flag}",
+               "info": "echo extra", "labels": {"on": "ON AIR"},
+               "level": {"get": f"cat {self.val}", "set": f"echo {{value}} > {self.val}", "min": 88100, "max": 107900, "step": 100, "unit": "MHz",
+                         "divisor": 1000, "decimals": 1}}
+        man.update(over)
+        make_module(self.d, "radio", man)
+        mods, errs = mod.discover([self.d])
+        self.assertEqual(errs, [], errs)
+        sc = mod.Switch(mods[0], spawn=lambda f: f())
+        return sc, Gothi(sc, Settings(os.devnull))
+
+    def test_level_on_the_same_screen_and_label(self):
+        sc, g = self.sw()
+        sc.on_enter(g)
+        self.assertEqual(sc.sub.value, 90500)
+        self.assertEqual(mod._fmt_value(sc.sub.m, 90500), "90.5 MHz")
+        g.key(keys.RIGHT)
+        g.key(keys.RIGHT)
+        g.key(keys.LEFT)
+        self.assertEqual(open(self.val).read().strip(), "90600")
+        g.key(keys.OK)
+        self.assertTrue(sc.on)
+        c = Canvas()
+        g.draw(c)
+        self.assertGreater(sum(c.px), 100)
+        g.draw(Canvas(h=80))
+
+    def test_confirm_is_asked_before_every_start_and_back_says_no(self):
+        sc, g = self.sw(confirm="It will transmit. Sure?")
+        sc.on_enter(g)
+        g.key(keys.OK)
+        self.assertTrue(sc.asking)
+        self.assertFalse(os.path.exists(self.flag))              # nothing started yet
+        g.draw(Canvas())
+        g.key(keys.BACK)                                         # no: the screen stays, nothing runs
+        self.assertEqual((sc.asking, os.path.exists(self.flag), g.stack), (False, False, [sc]))
+        g.key(keys.OK)
+        g.key(keys.OK)                                           # yes
+        self.assertTrue(os.path.exists(self.flag))
+        g.key(keys.OK)                                           # stopping needs no question
+        self.assertFalse(os.path.exists(self.flag))
+        g.key(keys.OK)
+        self.assertTrue(sc.asking)                               # the next start asks again
+
+    def test_auto_off_runs_detached_and_a_manual_stop_cancels_it(self):
+        sc, g = self.sw(auto_off=1, level=None)
+        sc.on_enter(g)
+        g.key(keys.OK)
+        self.assertTrue(os.path.exists(self.flag))
+        self.assertTrue(any("auto-off in" in x for x in sc.info))
+        time.sleep(2.0)
+        self.assertFalse(os.path.exists(self.flag))              # the timer switched it off
+        g.key(keys.OK)                                           # on again, now stop by hand before the timer
+        sc.m.auto_off = 3
+        g.key(keys.OK)
+        g.key(keys.OK)
+        self.assertFalse(os.path.exists(self.flag))
+        sc.m.auto_off = 1
+        g.key(keys.OK)
+        g.key(keys.OK)                                           # started and stopped: the timer must be gone
+        open(self.flag, "w").close()                             # something else switches it on afterwards ...
+        time.sleep(1.6)
+        self.assertTrue(os.path.exists(self.flag))               # ... and the cancelled timer does not touch it
+
+    def test_bad_extras_are_rejected(self):
+        for bad in ({"auto_off": -1}, {"auto_off": "soon"}, {"labels": "x"}, {"level": {"get": "x"}},
+                    {"level": {"get": "x", "set": "y", "min": 5, "max": 1}}, {"level": {"get": "x", "set": "y", "divisor": 0}}):
+            with tempfile.TemporaryDirectory() as d2:
+                man = {"title": "R", "type": "switch", "status": "true", "start": "true", "stop": "true"}
+                man.update(bad)
+                make_module(d2, "r", man)
+                self.assertEqual(len(mod.discover([d2])[1]), 1, bad)

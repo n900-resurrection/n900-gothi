@@ -24,6 +24,13 @@ Three kinds need no Python: shell commands decide everything. `switch` is an on/
      "timeout": 90,                      optional: seconds the command may take
      "deed": "time_sync", "deeds": {...}}
 
+    A switch may also have, optionally:
+     "level": {"get": "...", "set": "... {value}", "min": 88100, "max": 107900, "step": 100, "unit": "MHz", "divisor": 1000, "decimals": 1}
+                                         a number on the same screen (Left/Right), shown divided by `divisor`
+     "confirm": "It will transmit. Sure?"        asked before every start (OK = yes, Back = no)
+     "auto_off": 1800                    seconds: after a start a detached timer runs `stop` (it works when gothi is closed, a manual stop cancels it)
+     "labels": {"on": "ON AIR", "off": "OFF"}
+
     {"title": "Volume", "type": "level",
      "get": "...",                       prints the current value (the first number is taken)
      "set": "amixer sset Master {value}%",       {value} is replaced by the number; the last value wins while the command runs
@@ -51,6 +58,7 @@ import codecs
 import json
 import os
 import re
+import shlex
 import signal
 import subprocess
 import threading
@@ -78,6 +86,31 @@ class Missing(Exception):
     """A required tool is not on this system: the module is left out without an error."""
 
 
+def _level_fields(d):
+    """(min, max, step, unit, divisor, decimals) of a `level` description, validated."""
+    lo, hi, step = (d.get(k, v) for k, v in (("min", 0), ("max", 100), ("step", 5)))
+    unit = str(d.get("unit", ""))[:3]
+    div, dec = d.get("divisor", 1), d.get("decimals", 0)
+    if not all(isinstance(v, int) and not isinstance(v, bool) for v in (lo, hi, step, div, dec)) or not lo < hi or step < 1 or div < 1 or not 0 <= dec <= 3:
+        raise ValueError("bad min, max, step, divisor or decimals")
+    return lo, hi, step, unit, div, dec
+
+
+def _fmt_value(m, v):
+    """A level value as the screen shows it: 90500 with divisor 1000 and 1 decimal is 90.5, then the unit."""
+    if v is None:
+        return "..."
+    txt = f"{v / m.div:.{m.dec}f}" if m.div > 1 else str(v)
+    return f"{txt}{' ' if m.unit and m.div > 1 else ''}{m.unit}"
+
+
+class _Sub:
+    """The level inside a switch, in the shape that the scene Level wants of a module."""
+    def __init__(self, title, cmds, fields):
+        self.title, self.cmds, self.deed = title, cmds, None
+        self.lo, self.hi, self.step, self.unit, self.div, self.dec = fields
+
+
 class Module:
     def __init__(self, path, data):
         self.path, self.id = path, os.path.basename(path.rstrip("/"))
@@ -93,12 +126,9 @@ class Module:
             raise ValueError("bad requires")
         if any(not os.path.exists(r) for r in req):
             raise Missing()
-        self.lo, self.hi, self.step, self.unit = 0, 100, 5, ""
+        self.lo, self.hi, self.step, self.unit, self.div, self.dec = 0, 100, 5, "", 1, 0
         if self.kind == "level":
-            self.lo, self.hi, self.step = (data.get(k, d) for k, d in (("min", 0), ("max", 100), ("step", 5)))
-            self.unit = str(data.get("unit", ""))[:3]
-            if not all(isinstance(v, int) and not isinstance(v, bool) for v in (self.lo, self.hi, self.step)) or not self.lo < self.hi or self.step < 1:
-                raise ValueError("bad min, max or step")
+            self.lo, self.hi, self.step, self.unit, self.div, self.dec = _level_fields(data)
         self.cmds = {}
         for c in KINDS[self.kind] + ("info", "ready"):
             v = data.get(c)
@@ -108,6 +138,23 @@ class Module:
                 if not isinstance(v, str) or not v.strip():
                     raise ValueError(f"bad command {c!r}")
                 self.cmds[c] = v.replace("{dir}", path)           # a module can ship a script of its own
+        self.on_label, self.off_label, self.confirm, self.auto_off, self.level = "ON", "OFF", None, 0, None
+        if self.kind == "switch":
+            lab = data.get("labels", {})
+            if not isinstance(lab, dict):
+                raise ValueError("bad labels")
+            self.on_label, self.off_label = str(lab.get("on", "ON"))[:8], str(lab.get("off", "OFF"))[:8]
+            if data.get("confirm") is not None:
+                self.confirm = str(data["confirm"])[:80]
+            ao = data.get("auto_off", 0)
+            if not isinstance(ao, int) or isinstance(ao, bool) or not 0 <= ao <= 86400:
+                raise ValueError("bad auto_off")
+            self.auto_off = ao
+            lv = data.get("level")
+            if lv is not None:
+                if not isinstance(lv, dict) or not all(isinstance(lv.get(c), str) and lv[c].strip() for c in ("get", "set")):
+                    raise ValueError("bad level")
+                self.level = _Sub(self.title, {c: lv[c].replace("{dir}", path) for c in ("get", "set")}, _level_fields(lv))
         t = data.get("timeout", 90)
         if not isinstance(t, (int, float)) or isinstance(t, bool) or not 1 <= t <= 600:
             raise ValueError("bad timeout")
@@ -162,10 +209,12 @@ def _thread(fn):
 
 
 class Switch(Scene):
-    """On/off of a service: big ON or OFF, OK toggles. The commands run in a background thread (the screen never waits for them)."""
+    """On/off of a service: big ON or OFF, OK toggles. The commands run in a background thread (the screen never waits for them).
+    Optional in the manifest: a `level` (Left/Right change it on the same screen), `confirm` (a question before every start: OK = yes, Back = no),
+    `auto_off` (seconds: after a start a detached timer runs `stop`, also when gothi is closed; a manual stop cancels it), `labels` (the words for on and off)."""
 
-    def __init__(self, module, run=run_cmd, spawn=_thread):
-        self.m, self.run, self.spawn = module, run, spawn
+    def __init__(self, module, run=run_cmd, spawn=_thread, clock=time.time):
+        self.m, self.run, self.spawn, self.clock = module, run, spawn, clock
         self.title = module.title
         self.on = None                  # None: not known yet
         self.busy = False               # a command runs in the background (the check too: it is not shown, it would only blink)
@@ -174,6 +223,9 @@ class Switch(Scene):
         self.top = 0                    # the first line of `info` that is shown
         self.checked = 0.0
         self.earned = False
+        self.asking = False             # the confirmation of a start is shown
+        self.sub = Level(module.level, run, spawn, clock) if module.level else None
+        self.info_y = 50 if self.sub else 40
 
     def on_enter(self, gothi):
         self.refresh()
@@ -182,11 +234,45 @@ class Switch(Scene):
         if self.busy:
             return
         self.busy = True
+        if self.sub:
+            self.sub.refresh()
         self.spawn(self._refresh)
 
     def _refresh(self):
         self._status()
         self.busy = False
+
+    def _timer_file(self):
+        d = os.path.join(os.path.expanduser("~"), ".cache", "gothi")
+        os.makedirs(d, exist_ok=True)
+        return os.path.join(d, f"auto-off-{os.path.basename(self.m.path.rstrip('/'))}.pid")
+
+    def _arm(self):
+        """After a start: a detached timer that runs `stop` (it lives on when gothi is closed)."""
+        self._disarm()
+        if self.m.auto_off:
+            pidf = shlex.quote(self._timer_file())
+            subprocess.Popen(["/bin/sh", "-c", f"echo $$ > {pidf}; sleep {int(self.m.auto_off)}; {self.m.cmds['stop']}; rm -f {pidf}"], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+    def _disarm(self):
+        try:
+            f = self._timer_file()
+            with open(f) as fh:
+                pid = int(fh.read().strip())
+            os.remove(f)
+            os.killpg(pid, signal.SIGTERM)
+        except (OSError, ValueError):
+            pass
+
+    def _remaining(self):
+        """Seconds until the auto-off timer fires, None when there is none."""
+        if not self.m.auto_off:
+            return None
+        try:
+            return max(0, int(os.path.getmtime(self._timer_file()) + self.m.auto_off - self.clock()))
+        except OSError:
+            return None
 
     def _status(self):
         """Ask for the state; the new values replace the old ones at the end, so the screen never shows a half-empty state."""
@@ -196,18 +282,29 @@ class Switch(Scene):
         if on and "info" in self.m.cmds:
             _, out = self.run(self.m.cmds["info"])
             info = _wrap("\n".join(ln.strip() for ln in out.splitlines() if ln.strip()))[:SHOWN_INFO]
+        left = self._remaining() if on else None
+        if left is not None:
+            info.insert(0, f"auto-off in {max(1, (left + 59) // 60)} min")       # first: it is the one that matters
         self.info, self.on = info, on
 
     def toggle(self):
         if self.busy or self.on is None:
             return
+        if not self.on and self.m.confirm and not self.asking:
+            self.asking = True                                   # the question first
+            return
+        self.asking = False
         cmd = self.m.cmds["stop" if self.on else "start"]
         starting = not self.on
         self.busy, self.action = True, "starting" if starting else "stopping"
         self.spawn(lambda: self._toggle(cmd, starting))
 
     def _toggle(self, cmd, starting):
+        if not starting:
+            self._disarm()
         self.run(cmd, 30)
+        if starting:
+            self._arm()
         if starting and "ready" in self.m.cmds:                  # the process is there, the service may not answer yet
             waited = 0.0
             while waited < READY_TIMEOUT and self.run(self.m.cmds["ready"], 5)[0] != 0:
@@ -218,8 +315,16 @@ class Switch(Scene):
         self.action, self.busy = None, False
 
     def key(self, k, gothi):
+        if self.asking:
+            if k == keys.OK:
+                self.toggle()
+            elif k == keys.BACK:
+                self.asking = False                              # "no": stay on the screen
+            return
         if k == keys.OK:
             self.toggle()
+        elif self.sub and k in (keys.LEFT, keys.RIGHT):
+            self.sub.change(1 if k == keys.RIGHT else -1)
         elif k == keys.UP:
             self.top = max(0, self.top - 1)
         elif k == keys.DOWN:
@@ -227,10 +332,8 @@ class Switch(Scene):
         elif k == keys.BACK:
             gothi.pop()
 
-    INFO_Y = 40
-
     def visible(self, h):
-        return max(1, (h - self.INFO_Y) // 8)
+        return max(1, (h - self.info_y) // 8)
 
     def tick(self, now, gothi):
         if self.earned:
@@ -244,19 +347,26 @@ class Switch(Scene):
     def draw(self, c, gothi):
         c.text(2, 2, self.title)
         c.hline(0, 9, c.w)
-        word = "..." if self.on is None else ("ON" if self.on else "OFF")
-        c.text(4, 14, word, scale=3)
+        if self.asking:
+            for i, ln in enumerate(_wrap(self.m.confirm, c.w - 12)):
+                c.text(4, 14 + i * 9, ln)
+            c.text(4, c.h - 9, "OK = yes   Back = no")
+            return
+        word = "..." if self.on is None else (self.m.on_label if self.on else self.m.off_label)
+        c.text(4, 14, word, scale=3 if len(word) <= 4 else 2)
         hint = self.action or ("" if self.on is None else "OK = " + ("stop" if self.on else "start"))
         c.text(c.w - 4 - c.text_width(hint), 20, hint)
+        if self.sub:
+            c.text(4, 38, "<  " + _fmt_value(self.sub.m, self.sub.value) + "  >")
         n = self.visible(c.h)
         self.top = max(0, min(self.top, len(self.info) - n))
         for i, ln in enumerate(self.info[self.top:self.top + n]):
-            c.text(4, self.INFO_Y + 2 + i * 8, ln)
+            c.text(4, self.info_y + 2 + i * 8, ln)
         if len(self.info) > n:                                    # scroll bar
-            bar = c.h - self.INFO_Y
-            c.vline(c.w - 2, self.INFO_Y, bar)
+            bar = c.h - self.info_y
+            c.vline(c.w - 2, self.info_y, bar)
             h = max(4, bar * n // len(self.info))
-            c.box(c.w - 3, self.INFO_Y + (bar - h) * self.top // (len(self.info) - n), 3, h)
+            c.box(c.w - 3, self.info_y + (bar - h) * self.top // (len(self.info) - n), 3, h)
 
 
 def _wrap(text, width=118):
@@ -398,7 +508,7 @@ class Level(Scene):
     def draw(self, c, gothi):
         c.text(2, 2, self.title)
         c.hline(0, 9, c.w)
-        txt = "..." if self.value is None else f"{self.value}{self.m.unit}"
+        txt = _fmt_value(self.m, self.value)
         c.text(4, 14, txt, scale=3)
         if self.value is not None:
             w = c.w - 10
