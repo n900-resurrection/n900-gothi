@@ -983,3 +983,34 @@ class SwitchExtrasTest(unittest.TestCase):
                 man.update(bad)
                 make_module(d2, "r", man)
                 self.assertEqual(len(mod.discover([d2])[1]), 1, bad)
+
+
+class PythonModuleTest(unittest.TestCase):
+    def mk(self, code, **over):
+        d = tempfile.mkdtemp()
+        os.makedirs(os.path.join(d, "py"))
+        open(os.path.join(d, "py", "module.py"), "w").write(code)
+        open(os.path.join(d, "py", "helper_for_test.py"), "w").write("VALUE = 'from the helper'\n")
+        man = dict({"title": "Py", "type": "python", "entry": "module.py"}, **over)
+        open(os.path.join(d, "py", "module.json"), "w").write(__import__("json").dumps(man))
+        return mod.discover([d])
+
+    def test_create_gives_the_scene_and_siblings_can_be_imported(self):
+        mods, errs = self.mk("from gothi.apps import Message\nimport helper_for_test\ndef create(module):\n    return Message(module.title, [helper_for_test.VALUE])\n")
+        self.assertEqual(errs, [])
+        sc = mod.scene_for(mods[0])
+        self.assertEqual(sc.lines, ["from the helper"])
+        g = Gothi(sc, Settings(os.devnull))
+        g.draw(Canvas())
+
+    def test_errors_in_the_module_become_a_page_not_a_crash(self):
+        for code in ("raise RuntimeError('boom at import')\n", "def create(module):\n    raise ValueError('boom in create')\n", "x = 1\n"):
+            mods, _ = self.mk(code)
+            sc = mod.scene_for(mods[0])
+            self.assertEqual(sc.title, "Py")
+            self.assertEqual(sc.lines[0], "module failed:")
+            Gothi(sc, Settings(os.devnull)).draw(Canvas())
+
+    def test_entry_must_be_a_plain_file_next_to_the_manifest(self):
+        for bad in ("../module.py", "sub/module.py", "module.txt", "", None, 5, "nothere.py"):
+            self.assertEqual(len(self.mk("def create(m): pass\n", entry=bad)[1]), 1, bad)

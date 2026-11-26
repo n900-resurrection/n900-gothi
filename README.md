@@ -80,7 +80,7 @@ Features that need more than stock Maemo are **modules**: they are installed on 
 
 What is a module and what is not: the **core** is what needs nothing beyond stock Maemo and is always wanted (clock, battery, dolphin, settings). The rest uses the same mechanism; if it depends on another package (a file server) it is a package of its own, if it needs only the stock system it may be bundled in `gothi` but is still loaded as a module.
 
-Five kinds need **no Python**, only shell commands: `switch` (on/off of a service), `action` (runs one command, shows the lines it printed, scrolls), `level` (a number that Left/Right change), `monitor` (a command that runs while the page is open, every block of lines closed by an empty line replaces the page: the GPS) and `ask` (see below). A `switch`:
+Six kinds exist, five of them need **no Python**, only shell commands: `switch` (on/off of a service), `action` (runs one command, shows the lines it printed, scrolls), `level` (a number that Left/Right change), `monitor` (a command that runs while the page is open, every block of lines closed by an empty line replaces the page: the GPS) and `ask` (see below). A `switch`:
 
 ```json
 {"title": "File server", "type": "switch",
@@ -104,6 +104,8 @@ Every manifest may have `"menu": "settings"` (the entry goes to **Settings**, af
 | Wi-Fi | on / off, network and address | `wifi.sh` of the package `wifi-switcher` (recommended by the package; without it the entry is not shown) |
 
 A `switch` may also have (all optional): `level` (a number on the same screen, Left/Right change it; `get`, `set`, `min`, `max`, `step`, `unit` and `divisor` + `decimals` to show 90500 as 90.5), `confirm` (a question asked before every start: OK = yes, Back = no), `auto_off` (seconds; after a start a **detached timer** runs `stop`, also when gothi is closed; a manual stop cancels it; the screen shows the time left) and `labels` (the words for on and off, e.g. `ON AIR`). See [gothi-fmtx](https://github.com/n900-resurrection/gothi-fmtx) for all of them together.
+
+The kind `python` is a module with code of its own: the manifest names a file (`"entry": "module.py"`) that defines `create(module)` and returns a scene (see `gothi/ui.py`: `Scene`, `Menu`, `ScrollView`). Files next to it can be imported (give them names of their own, the folder is put in `sys.path`); the folder is looked at again every time the module is opened, so no restart is needed while developing. An error in the module is shown as a page, not as a crash. See [gothi-ir](https://github.com/n900-resurrection/gothi-ir).
 
 The kind `ask` types a question and shows an answer: the question is typed on the keyboard (slide it out; with the keyboard closed the page asks for that), **Enter** asks, **Esc** leaves. The command `run` gets the question in the environment variable `GOTHI_INPUT` (never pasted into the command line, so quotes and `$()` in it do nothing) and what it prints is the answer, shown as it comes in a **speech bubble over an animation of the dolphin** (`animation`: a folder of the firmware, e.g. `L1_Waves_128x50`; `hint`: an example question). Up/Down scroll a long answer, Enter or Esc asks again. See [gothi-tiny](https://github.com/n900-resurrection/gothi-tiny). A scene that wants typed characters sets `text_input = True` and gets them in `on_text()`; `python3 -m gothi --keys` can type in tests: `t:some text`.
 

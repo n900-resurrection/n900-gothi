@@ -6,7 +6,8 @@ replaces the earlier one (so the user can change a packaged module). Nothing is 
 
 Three kinds need no Python: shell commands decide everything. `switch` is an on/off of a service, `action` runs one command and shows what it printed,
 `level` is a number that Left/Right change (volume, brightness), `monitor` runs a command for as long as its page is open and shows what it prints
-(GPS, a scan that repeats), `ask` takes a question typed on the keyboard and shows the answer of a command in a speech bubble of the dolphin.
+(GPS, a scan that repeats), `ask` takes a question typed on the keyboard and shows the answer of a command in a speech bubble of the dolphin,
+`python` is a module with code of its own (screens that the other kinds cannot make: a list of remotes and their buttons).
 
     {"title": "File server",             menu label
      "type": "switch",
@@ -47,6 +48,10 @@ Three kinds need no Python: shell commands decide everything. `switch` is an on/
      "animation": "L1_Waves_128x50",     optional: the animation of the firmware (dolphin/external) behind the bubble
      "deed": "ask_tiny", "deeds": {...}}
 
+    {"title": "Infrared", "type": "python", "entry": "module.py"}      module.py (in the folder of the module) defines  create(module) -> Scene
+                                         and may import files that lie next to it; give them names of their own (ir_lib.py, not lib.py), because the
+                                         folder is put in sys.path. If the import or create() fails the module shows the error, gothi goes on.
+
 In every command {dir} is replaced by the folder of the module, so a module can ship a script ("run": "python2.5 {dir}/gps-stream.py").
 
 Every manifest may also have  "menu": "settings"  (the entry goes to the Settings, default "modules": the menu Modules)  and
@@ -55,19 +60,21 @@ Every manifest may also have  "menu": "settings"  (the entry goes to the Setting
 A broken module is skipped and shown as a line in the menu, the rest keeps working. Python modules (module.py with register()) will come with the first module that needs one."""
 import atexit
 import codecs
+import importlib.util
 import json
 import os
 import re
 import shlex
 import signal
 import subprocess
+import sys
 import threading
 import time
 
 from . import keys
 from .ui import Menu, Scene, ScrollView
 
-KINDS = {"switch": ("status", "start", "stop"), "action": ("run",), "level": ("get", "set"), "monitor": ("run",), "ask": ("run",)}      # kind -> the commands it needs
+KINDS = {"switch": ("status", "start", "stop"), "action": ("run",), "level": ("get", "set"), "monitor": ("run",), "ask": ("run",), "python": ()}      # kind -> the commands it needs
 POLL = 5                                            # seconds between two status checks while the scene is open
 SHOWN_INFO = 30                                     # lines of `info` that are kept (the page scrolls)
 READY_TIMEOUT = 90                                  # seconds to wait for `ready` after a start
@@ -159,6 +166,12 @@ class Module:
         if not isinstance(t, (int, float)) or isinstance(t, bool) or not 1 <= t <= 600:
             raise ValueError("bad timeout")
         self.timeout = t
+        self.entry = None
+        if self.kind == "python":
+            e = data.get("entry")
+            if not isinstance(e, str) or not re.fullmatch(r"[A-Za-z0-9_]+\.py", e) or not os.path.isfile(os.path.join(path, e)):
+                raise ValueError("missing or bad entry")
+            self.entry = e
         self.hint = str(data.get("hint", ""))[:40]
         self.animation = data.get("animation") if isinstance(data.get("animation"), str) and "/" not in data.get("animation") else None
         icon = data.get("icon")
@@ -764,7 +777,23 @@ def _stop_all():
 SCENES = {"switch": Switch, "action": Action, "level": Level, "monitor": Monitor, "ask": Ask}
 
 
+def _python_scene(module):
+    """The scene of a module with code of its own. Whatever goes wrong in it becomes a page with the message: a module must not take gothi down."""
+    from .apps import Message
+    try:
+        if module.path not in sys.path:
+            sys.path.insert(0, module.path)                       # the files next to module.py can be imported
+        spec = importlib.util.spec_from_file_location("gothi_module_" + re.sub(r"\W", "_", module.id), os.path.join(module.path, module.entry))
+        code = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(code)
+        return code.create(module)
+    except Exception as e:                                        # noqa: BLE001
+        return Message(module.title[:20], ["module failed:"] + _wrap(f"{type(e).__name__}: {e}", 118)[:5])
+
+
 def scene_for(module):
+    if module.kind == "python":
+        return _python_scene(module)
     return SCENES[module.kind](module)
 
 
