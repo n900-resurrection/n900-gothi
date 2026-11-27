@@ -113,6 +113,8 @@ Every manifest may have `"menu": "settings"` (the entry goes to **Settings**, af
 | Bluetooth | on / off | `hciconfig hci0 up/down` through `sudo gainroot` |
 | Wi-Fi | on / off, network and address | `wifi.sh` of the package `wifi-switcher` (recommended by the package; without it the entry is not shown) |
 | Wi-Fi scan | the networks around, channels, summary, saved networks (menu Modules) | `iwlist wlan0 scan`, see [below](#wi-fi-scan) |
+| Flashlight | the flash LED as a torch, switches off by itself after 15 minutes (menu Modules) | V4L2, see [below](#flashlight) |
+| Bluetooth scan | the discoverable devices around, summary, known devices (menu Modules) | `hcitool scan`, see [below](#bluetooth-scan) |
 
 ### Wi-Fi scan
 
@@ -130,6 +132,41 @@ The bundled module **Wi-Fi scan** (menu Modules) shows what the phone's Wi-Fi he
 - **Saved networks**: the Wi-Fi networks stored in the phone (the connection manager's list), `*` marks those in range. It only lists them; connecting is not done yet.
 
 A scan takes about a second and repeats every 5 seconds while one of the screens is on top. A normal user can only read the *results of the last scan* on the N900 (often one network), a fresh scan needs root, so the package installs one narrow `sudo` rule, `user ALL = NOPASSWD: /sbin/iwlist wlan0 scan` (in `/etc/sudoers.d/gothi.sudoers`, removed with the package). Without it the module falls back to the stale results. The data code is `gothi/wifi.py` (parsing, channel and summary maths, saved networks) and is meant to be reused by other modules.
+
+### Flashlight
+
+The bundled module **Flashlight** (menu Modules) is a switch for the **flash LED** of the camera. OK toggles it, the screen shows the time left of the **auto-off** (15 minutes; the timer is detached, so it also works when gothi is closed).
+
+| ![On](screenshots/flashlight-on.png) | ![Off](screenshots/flashlight-off.png) |
+|---|---|
+
+The ADP1653 flash driver lets the torch burn only while the camera device (`/dev/video0`) is open, so `modules/flashlight/torch.py start` leaves a small detached process that holds it open and sets the V4L2 control `V4L2_CID_TORCH_INTENSITY` to 1 (the same way as the flashlight applet of Maemo does); `stop` ends that process, which puts the LED out. If the process is killed the LED goes out too. The group `video` may open the device, so no root is needed. **Two modes, torch and flash: estimated currents and times (a warning).** The chip has two modes for the two white LEDs of the flash (they sit in series, driven by one ADP1653; the red indicator LED next to them is separate). The **torch** is a weak steady light, the **flash** a strong pulse for photos. What is written about them (the [Maemo wiki](https://wiki.maemo.org/N900_Hardware_Flash_Torch), the [Leste page](https://leste.maemo.org/Nokia_N900) and the [datasheet](https://www.analog.com/en/products/adp1653.html); the wiki is about 16 years old and not consistent) comes to this, and it is an **estimate, not something measured here**:
+
+| mode | current (estimate) | time |
+|---|---|---|
+| torch | up to about 50 mA (the wiki also lists steps up to 200 mA) | any length; several hours in a row were reported without a change of brightness or colour |
+| flash | up to about 320 mA | at most 0.5 s |
+| indicator LED (red) | 2.5 to 17.5 mA | any length |
+
+The module uses the **torch mode only**, never the flash: it sets the V4L2 control *torch intensity* to 0 or 1 and the **driver chooses the current**; gothi cannot read it or raise it. It is the same control that the flashlight applet of Maemo uses. Warning: the current, not the time, is what damages the LEDs: Leste says to use the lowest torch current only, and a higher setting "will probably cause irreversible hardware damage". The chip switches itself off above 155 degrees, which protects the chip and not necessarily the LEDs. So do not add code that writes other values (flash mode, the strobe, other torch steps), and keep the 15 minutes of auto-off (`auto_off` in `modules/flashlight/module.json`); do not leave the torch on in a pocket or under a cover.
+
+The status LED (the coloured one at the top) is a separate matter, see [#22](https://github.com/n900-resurrection/n900-gothi/issues/22).
+
+### Bluetooth scan
+
+The bundled module **Bluetooth scan** (menu Modules) lists the Bluetooth devices around that are *discoverable*: name, kind (phone, audio, input, tv...), address. A scan is an **inquiry**: the phone asks the devices around and they answer (`hcitool scan`, about six seconds plus a second for each device that has to be asked for its name; it works as the normal user). Nothing connects and nothing is paired. Bluetooth has to be on (Settings > Bluetooth): the module says so when it is not.
+
+| ![Devices](screenshots/bluetooth-scan-devices.png) | ![Device](screenshots/bluetooth-scan-detail.png) | ![Summary](screenshots/bluetooth-scan-summary.png) |
+|---|---|---|
+| ![Known](screenshots/bluetooth-scan-known.png) | | |
+
+(Made on a computer with a made-up list of devices.)
+
+- **Devices**: the devices of the last scan; a device that did not tell its name is shown by the end of its address. OK opens one: address, kind (from the class of device), whether it is in range now, in how many scans it was seen.
+- **Summary**: counts by kind, devices with a name, and how many different devices were seen since the module was opened.
+- **Known devices**: the devices the phone has met before (its own lists in `/var/lib/bluetooth`), `*` marks the paired ones, and when it last saw them. The file with the link keys is read only for the addresses in it, never the keys.
+
+The scan repeats while one of the screens is on top and stops when you leave. An inquiry is a short radio transmission and it can make Bluetooth audio stutter while it runs. There is no signal level in the list: the old BlueZ of the N900 gives one only for connected devices. A modern phone is usually not discoverable unless its Bluetooth settings page is open; Low Energy devices are not found at all (the N900 has Bluetooth 2.1). The data code is `gothi/bluetooth.py`.
 
 A `switch` may also have (all optional): `level` (a number on the same screen, Left/Right change it; `get`, `set`, `min`, `max`, `step`, `unit` and `divisor` + `decimals` to show 90500 as 90.5), `confirm` (a question asked before every start: OK = yes, Back = no), `auto_off` (seconds; after a start a **detached timer** runs `stop`, also when gothi is closed; a manual stop cancels it; the screen shows the time left) and `labels` (the words for on and off, e.g. `ON AIR`). See [gothi-fmtx](https://github.com/n900-resurrection/gothi-fmtx) for all of them together.
 

@@ -43,6 +43,19 @@ bluetooth_cycle() {
 contains bluetooth-cycle "bluetooth-cycle-ok" bluetooth_cycle
 # Wi-Fi: only the state is read (switching it off would cut the connection that runs this test)
 contains wifi-status "on" sh -c 'su user -c "$(PYTHONPATH=/opt/gothi/lib python3 -W ignore -c "import json; print(json.load(open(\"/opt/gothi/modules/wifi/module.json\"))[\"status\"])")" && echo on || echo off'
+# Flashlight: the flash LED lights for a moment (a start, the state, a stop), and no holder process is left behind
+contains bundled-flashlight "Flashlight (switch)" sh -c '/usr/bin/gothi --modules'
+flashlight_cycle() {
+    T="python3 /opt/gothi/modules/flashlight/torch.py"
+    su user -c "$T stop"; su user -c "$T status" && return
+    su user -c "$T start" || return; su user -c "$T status" || return
+    sleep 1; su user -c "$T stop"; su user -c "$T status" && return
+    echo "flashlight-cycle-ok"
+}
+contains flashlight-cycle "flashlight-cycle-ok" flashlight_cycle
+# Bluetooth scan: the module is offered; the adapter state and the known devices are only read (an inquiry is not made by the test)
+contains bundled-bluetooth-scan "Bluetooth scan (python)" sh -c '/usr/bin/gothi --modules'
+contains bluetooth-known-read "known" sh -c 'su user -c "PYTHONPATH=/opt/gothi/lib python3 -W ignore -c \"from gothi import bluetooth as b; b.adapter_up(); print(len(b.read_known()) >= 0 and \\\"known\\\")\""'
 # touching the screen itself: off by default (a tap does nothing), on with the setting (a tap on the first row opens the Clock, which earns a deed)
 rm -f "$HOME/.config/gothi/dolphin-state.json"
 SDL_VIDEODRIVER=dummy /usr/bin/gothi --mode keyboard --frames 8 --keys tap:40:14 >/dev/null 2>&1

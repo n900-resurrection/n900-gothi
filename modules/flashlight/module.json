@@ -1,0 +1,12 @@
+{
+  "title": "Flashlight",
+  "type": "switch",
+  "requires": ["/sys/class/video4linux/video0"],
+  "status": "python3 {dir}/torch.py status",
+  "start": "python3 {dir}/torch.py start",
+  "stop": "python3 {dir}/torch.py stop",
+  "auto_off": 900,
+  "labels": {"on": "LIGHT", "off": "OFF"},
+  "deed": "flashlight_on",
+  "deeds": {"flashlight_on": {"group": "modules", "xp": 1}}
+}

@@ -738,9 +738,11 @@ class LevelTest(unittest.TestCase):
                 json.dump(data, f)
         mods, errs = mod.discover([tmp])
         self.assertEqual(errs, [])
-        self.assertEqual({m.id for m in mods}, {"volume", "brightness", "bluetooth", "wifi", "wifi-scan"})
-        self.assertTrue(all(m.menu == "settings" for m in mods if m.id != "wifi-scan"))
+        self.assertEqual({m.id for m in mods}, {"volume", "brightness", "bluetooth", "wifi", "wifi-scan", "flashlight", "bluetooth-scan"})
+        self.assertTrue(all(m.menu == "settings" for m in mods if m.id not in ("wifi-scan", "flashlight", "bluetooth-scan")))
         self.assertEqual({m.id: m.menu for m in mods}["wifi-scan"], "modules")
+        self.assertEqual({m.id: m.menu for m in mods}["flashlight"], "modules")
+        self.assertEqual({m.id: m.menu for m in mods}["bluetooth-scan"], "modules")
 
 
 class MonitorTest(unittest.TestCase):
