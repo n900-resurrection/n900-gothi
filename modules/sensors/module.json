@@ -1,0 +1,12 @@
+{
+  "title": "Sensors",
+  "type": "python",
+  "entry": "module.py",
+  "requires": ["/sys/bus/i2c/drivers/lis302dl"],
+  "deed": "sensors_view",
+  "deeds": {
+    "sensors_view": {"group": "modules", "xp": 1},
+    "level_used": {"group": "modules", "xp": 1},
+    "shake": {"group": "modules", "xp": 1}
+  }
+}

@@ -56,6 +56,19 @@ contains flashlight-cycle "flashlight-cycle-ok" flashlight_cycle
 # Bluetooth scan: the module is offered; the adapter state and the known devices are only read (an inquiry is not made by the test)
 contains bundled-bluetooth-scan "Bluetooth scan (python)" sh -c '/usr/bin/gothi --modules'
 contains bluetooth-known-read "known" sh -c 'su user -c "PYTHONPATH=/opt/gothi/lib python3 -W ignore -c \"from gothi import bluetooth as b; b.adapter_up(); print(len(b.read_known()) >= 0 and \\\"known\\\")\""'
+# Sensors: only reads (the accelerometer, the light sensor and the switches); the strength of the acceleration is about 1 g unless the phone is shaken hard
+contains bundled-sensors "Sensors (python)" sh -c '/usr/bin/gothi --modules'
+sensors_read() {
+    su user -c "PYTHONPATH=/opt/gothi/lib python3 -W ignore -c \"
+from gothi import sensors
+s = sensors.Sensors(config='/dev/null')
+s.poll()
+p = s.present()
+g = sensors.magnitude(s.acc) if s.acc else 0
+print('sensors-ok' if p['acc'] and p['light'] and p['switches'] and 0.5 < g < 2.5 and s.lux >= 0 else 'sensors-bad', p, g, s.lux)
+\""
+}
+contains sensors-read "sensors-ok" sensors_read
 # touching the screen itself: off by default (a tap does nothing), on with the setting (a tap on the first row opens the Clock, which earns a deed)
 rm -f "$HOME/.config/gothi/dolphin-state.json"
 SDL_VIDEODRIVER=dummy /usr/bin/gothi --mode keyboard --frames 8 --keys tap:40:14 >/dev/null 2>&1

@@ -115,6 +115,7 @@ Every manifest may have `"menu": "settings"` (the entry goes to **Settings**, af
 | Wi-Fi scan | the networks around, channels, summary, saved networks (menu Modules) | `iwlist wlan0 scan`, see [below](#wi-fi-scan) |
 | Flashlight | the flash LED as a torch, switches off by itself after 15 minutes (menu Modules) | V4L2, see [below](#flashlight) |
 | Bluetooth scan | the discoverable devices around, summary, known devices (menu Modules) | `hcitool scan`, see [below](#bluetooth-scan) |
+| Sensors | accelerometer, bubble level, light, switches such as the keyboard slide (menu Modules) | sysfs, see [below](#sensors) |
 
 ### Wi-Fi scan
 
@@ -132,6 +133,24 @@ The bundled module **Wi-Fi scan** (menu Modules) shows what the phone's Wi-Fi he
 - **Saved networks**: the Wi-Fi networks stored in the phone (the connection manager's list), `*` marks those in range. It only lists them; connecting is not done yet.
 
 A scan takes about a second and repeats every 5 seconds while one of the screens is on top. A normal user can only read the *results of the last scan* on the N900 (often one network), a fresh scan needs root, so the package installs one narrow `sudo` rule, `user ALL = NOPASSWD: /sbin/iwlist wlan0 scan` (in `/etc/sudoers.d/gothi.sudoers`, removed with the package). Without it the module falls back to the stale results. The data code is `gothi/wifi.py` (parsing, channel and summary maths, saved networks) and is meant to be reused by other modules.
+
+### Sensors
+
+The bundled module **Sensors** (menu Modules) shows the built-in sensors live. They are only read, nothing is written to them, and only while one of its screens is on top. The N900 has an accelerometer, an ambient light sensor and some switches; it has **no gyroscope, compass or barometer** (so no heading and no height), and the accelerometer gives the tilt and the shakes, not the rate of rotation. The design is in [docs/sensors.md](docs/sensors.md).
+
+| ![Overview](screenshots/sensors-overview.png) | ![Level](screenshots/sensors-level.png) | ![Accelerometer](screenshots/sensors-acc.png) |
+|---|---|---|
+| ![Light](screenshots/sensors-light.png) | ![Switches](screenshots/sensors-switches.png) | |
+
+(Made on a computer with made-up readings.)
+
+- **Overview**: the acceleration in mg and in g with how the phone lies, the light in lux, and the switches.
+- **Level**: a bubble level with the tilt of the two axes in degrees; OK (or a tap) says "this is level" and keeps it in `~/.config/gothi/sensors.json`; the back of a phone is not perfectly flat, so set the zero on the surface you use it on.
+- **Accelerometer**: the strength of the acceleration over the last seconds as a line (the dotted line is 1 g), the three axes and a **shake counter** (stronger than 1.8 g).
+- **Light**: lux from the sensor, a logarithmic bar, a word (dark, dim, indoor, bright, sun) and the last minute as a line.
+- **Switches**: keyboard slide, keyboard lock, camera lens cover, proximity, headphone jack and the camera buttons, and a **log of changes** (slide the keyboard, cover the lens, plug the headphones, and a line appears). Proximity is a single bit, not a distance: `closed` means something covers the sensor (confirmed with the phone in a case).
+
+The readings come from `/sys/bus/i2c/drivers/lis302dl/3-001d/coord` (mg, 1000 = 1 g), `/sys/class/i2c-adapter/i2c-2/2-0029/lux` and `/sys/devices/platform/gpio-switch/*/state`; the normal user may read all of them. The `enable` file of the accelerometer is left alone. The data code is `gothi/sensors.py` (with the sysfs root as a parameter, so the tests use a fake tree). The axes are those of the screen: x to the right, y down, z into the display; the sensor gives the reaction to gravity, so a positive value means that side is higher and the bubble moves to the high side. The top left corner of the screen is x and y with a minus (told by the author; the rest follows from it). Not yet confirmed on the phone: that normal landscape use reads y near -1000 (the words are "face up", "face down", "landscape", "landscape flipped", "portrait right up", "portrait left up"), (the light sensor refreshes about twice a second, measured by the author; the accelerometer counts the shakes reliably and gives fresh data).
 
 ### Flashlight
 
