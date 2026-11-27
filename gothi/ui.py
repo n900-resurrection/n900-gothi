@@ -16,6 +16,12 @@ class Scene:
     def on_tap(self, x, y, gothi):
         """A finger tapped the point (x, y) of the screen (the pixels of the 128 x h canvas); the title bar is handled before (Back)."""
 
+    def on_down(self, x, y, gothi):
+        """A finger went down at (x, y), before it is known whether it taps or drags (a remote control acts here and not on the tap)."""
+
+    def on_up(self, x, y, gothi):
+        """The finger went up (after a tap or a drag; on_tap comes after this one for a tap)."""
+
     def on_drag(self, dy, gothi):
         """A finger that is down moved dy pixels of the canvas (up is negative) since the last call; only after it moved more than a tap does."""
 
@@ -53,6 +59,7 @@ class Gothi:
         self._levelups = []
         self._checked = 0
         self._touch = None                 # the finger that is down: where it started, where it was, whether it drags
+        self.key_repeat = False            # set by the frontend before key(): True for the repeats the keyboard makes while a key is held
 
     DRAG_PX = 3                            # canvas pixels (18 on the display at x6) that the finger has to move before it is a drag, not a tap
 
@@ -63,6 +70,7 @@ class Gothi:
             return
         if kind == "down":
             self._touch = {"x": x, "y": y, "last": y, "drag": False}
+            self.top.on_down(x, y, self)
             return
         t = self._touch
         if t is None:
@@ -75,6 +83,7 @@ class Gothi:
                 t["last"] = y
         elif kind == "up":
             self._touch = None
+            self.top.on_up(x, y, self)
             if not t["drag"]:
                 if t["y"] < 10 and self.top.title_back:
                     self.key(keys.BACK)

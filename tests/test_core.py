@@ -1049,6 +1049,34 @@ class TouchScreenTest(unittest.TestCase):
         m = Menu("Main", items, **kw)
         return m, opened
 
+    def test_scenes_get_the_finger_down_and_up_even_when_it_drags(self):
+        from gothi.ui import Scene
+
+        class Rec(Scene):
+            def __init__(self):
+                self.log = []
+
+            def on_down(self, x, y, gothi):
+                self.log.append(("down", x, y))
+
+            def on_up(self, x, y, gothi):
+                self.log.append(("up", x, y))
+
+            def on_tap(self, x, y, gothi):
+                self.log.append(("tap", x, y))
+        r = Rec()
+        g = touch_gothi(r)
+        tap(g, 30, 30)
+        swipe(g, 40, 50, 10)
+        self.assertEqual(r.log, [("down", 30, 30), ("up", 30, 30), ("tap", 30, 30), ("down", 40, 50), ("up", 40, 10)])
+        off = Rec()
+        g = touch_gothi(off, on=False)
+        tap(g, 30, 30)
+        self.assertEqual(off.log, [])                                # the setting is off: no finger at all
+
+    def test_key_repeat_flag_defaults_to_false(self):
+        self.assertFalse(Gothi(Menu("m", [])).key_repeat)
+
     def test_nothing_happens_when_the_setting_is_off(self):
         m, opened = self.menu()
         g = touch_gothi(Menu("root", [("m", lambda gg: m)]), on=False)

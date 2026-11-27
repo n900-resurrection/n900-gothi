@@ -190,7 +190,8 @@ class Frontend:
         sdl2.SDL_SaveBMP(sdl2.SDL_GetWindowSurface(self.win), path.encode())
 
     # ---- input ------------------------------------------------------------
-    def press(self, k):
+    def press(self, k, repeat=False):
+        self.gothi.key_repeat = repeat
         self.gothi.key(k)
 
     def handle(self, e, now):
@@ -199,6 +200,7 @@ class Frontend:
             self.running = False
         elif t == sdl2.SDL_KEYDOWN:
             sym = e.key.keysym.sym
+            self.gothi.key_repeat = bool(e.key.repeat)               # a held key: the scenes that act on a hold (a remote control) look at it
             if sym == sdl2.SDLK_F2:
                 self.want = "touch" if self.layout.mode == "keyboard" else "keyboard"
             elif sym == sdl2.SDLK_q and e.key.keysym.mod & sdl2.KMOD_CTRL:
@@ -206,7 +208,7 @@ class Frontend:
             elif sym == sdl2.SDLK_BACKSPACE and self.gothi.top.text_input:
                 self.gothi.text("\b")
             elif map_key(sym, self.gothi.top.text_input):
-                self.press(map_key(sym, self.gothi.top.text_input))
+                self.press(map_key(sym, self.gothi.top.text_input), repeat=bool(e.key.repeat))
         elif t == sdl2.SDL_TEXTINPUT:
             self.gothi.text(e.text.text.decode("utf-8", "replace"))
         elif t == sdl2.SDL_MOUSEBUTTONDOWN and e.button.button == sdl2.SDL_BUTTON_LEFT:
@@ -259,7 +261,7 @@ class Frontend:
                 else:
                     self.press(item)
             if self.down and self.down[0] in REPEAT and now >= self.down[1]:
-                self.press(self.down[0])
+                self.press(self.down[0], repeat=True)
                 self.down = (self.down[0], now + 0.12)
             self.gothi.tick(now)
             want = bool(self.gothi.top.text_input)               # the text input of SDL runs only while a scene types

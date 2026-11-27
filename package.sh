@@ -6,7 +6,7 @@ PROJ=/project
 . "$PROJ/scripts/debpack.sh"
 
 PKG=gothi
-VERSION="${VERSION:-0.12.0}"
+VERSION="${VERSION:-0.13.0}"
 OUT="$PROJ/build/out/n900-gothi-$VERSION"
 HERE="$PROJ/apps/n900-gothi"
 STAGE="$PROJ/build/deb/stage-$PKG"
